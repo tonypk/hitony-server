@@ -28,4 +28,14 @@ class DeviceRegistry:
         self._tokens[device_id] = token
         self.save()
 
+    def delete(self, device_id: str) -> bool:
+        if device_id in self._tokens:
+            del self._tokens[device_id]
+            self.save()
+            return True
+        return False
+
+    def list_devices(self) -> Dict[str, str]:
+        return dict(self._tokens)
+
 registry = DeviceRegistry()
