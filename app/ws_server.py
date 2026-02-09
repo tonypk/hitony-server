@@ -80,10 +80,10 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
         # Fallback: return a test response (English for better TTS quality)
         reply = "OK, I got it"
 
-    # TTS
+    # TTS - now returns Opus packets
     try:
-        audio = await synthesize_tts(reply)
-        logger.info(f"TTS synthesized {len(audio)} bytes")
+        opus_packets = await synthesize_tts(reply)
+        logger.info(f"TTS synthesized {len(opus_packets)} Opus packets")
     except Exception as e:
         logger.error(f"TTS failed: {e}")
         await ws.send(json.dumps({"type": "error", "message": f"TTS failed: {e}"}))
@@ -91,11 +91,9 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
 
     await ws.send(json.dumps({"type": "tts_start"}))
 
-    # Stream PCM in larger chunks (60ms @ 16kHz = 1920 bytes)
-    # Larger chunks reduce network overhead and improve stability
-    chunk_size = 1920  # 60ms frames like xiaozhi
-    for i in range(0, len(audio), chunk_size):
-        await ws.send(audio[i:i+chunk_size])
+    # Stream Opus packets (each packet is 60ms frame)
+    for packet in opus_packets:
+        await ws.send(packet)
         await asyncio.sleep(0.02)  # Small delay to pace transmission
 
     await ws.send(json.dumps({"type": "tts_end"}))
