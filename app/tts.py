@@ -18,8 +18,8 @@ async def synthesize_tts(text: str) -> bytes:
     # Encode PCM16 to Opus (60ms frames @ 16kHz = 960 samples = 1920 bytes)
     encoder = opuslib.Encoder(settings.pcm_sample_rate, settings.pcm_channels, opuslib.APPLICATION_AUDIO)
 
-    # Set bitrate to auto for best quality
-    encoder.bitrate = opuslib.OPUS_AUTO
+    # Set bitrate to auto (-1 = automatic bitrate)
+    encoder.bitrate = -1
 
     opus_packets = []
     frame_size = 1920  # 60ms @ 16kHz mono PCM16 = 960 samples * 2 bytes
