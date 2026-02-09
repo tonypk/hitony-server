@@ -1,6 +1,9 @@
 import httpx
 import opuslib
+import logging
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 async def synthesize_tts(text: str) -> bytes:
     """Synthesize TTS and return Opus-encoded audio"""
@@ -37,9 +40,9 @@ async def synthesize_tts(text: str) -> bytes:
 
         # Debug: log first few packet sizes
         if len(opus_packets) <= 3:
-            print(f"DEBUG: Opus packet {len(opus_packets)}: {len(opus_packet)} bytes (from {len(frame)} bytes PCM)")
+            logger.info(f"Opus packet {len(opus_packets)}: {len(opus_packet)} bytes (from {len(frame)} bytes PCM)")
 
-    print(f"DEBUG: Total {len(opus_packets)} packets, sizes: {[len(p) for p in opus_packets[:5]]}")
+    logger.info(f"Total {len(opus_packets)} packets, sizes: {[len(p) for p in opus_packets[:5]]}")
 
     # Return list of Opus packets (not concatenated - send individually)
     return opus_packets
