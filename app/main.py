@@ -228,18 +228,41 @@ async def ws_endpoint(ws: WebSocket):
 
     state = ConnState(device_id)
 
+    async def keepalive():
+        """Send application-level ping every 30 seconds to keep connection alive"""
+        try:
+            while True:
+                await asyncio.sleep(30)  # 30 seconds interval
+                await ws.send_json({"type": "ping"})
+        except Exception:
+            return
+
+    ka_task = asyncio.create_task(keepalive())
+
     try:
         while True:
             msg = await ws.receive()
-            if msg.get("type") == "websocket.disconnect":
+            msg_type = msg.get("type")
+
+            if msg_type == "websocket.disconnect":
                 break
-            if "text" in msg and msg["text"]:
+            # Handle WebSocket protocol-level ping/pong frames
+            elif msg_type == "websocket.ping":
+                # FastAPI/Starlette automatically sends pong response
+                # Just need to acknowledge receipt to keep connection alive
+                continue
+            elif msg_type == "websocket.pong":
+                # Received pong response (from our keepalive ping or client's response)
+                continue
+            elif "text" in msg and msg["text"]:
                 data = msg["text"]
                 await handle_text_message(ws, state, data)
             elif "bytes" in msg and msg["bytes"]:
                 await handle_binary_message(ws, state, msg["bytes"])
     except WebSocketDisconnect:
         pass
+    finally:
+        ka_task.cancel()
 
 async def handle_text_message(ws: WebSocket, state: ConnState, text: str):
     # Expect simple JSON messages

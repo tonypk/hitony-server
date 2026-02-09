@@ -13,6 +13,6 @@ async def transcribe(file: UploadFile = File(...), rate: int = Form(16000), chan
     data = await file.read()
     audio = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
 
-    segments, _ = model.transcribe(audio, language="zh", beam_size=1)
+    segments, _ = model.transcribe(audio, language="en", beam_size=1)
     text = "".join([seg.text for seg in segments])
     return {"text": text.strip()}
