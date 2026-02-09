@@ -248,8 +248,8 @@ async def ws_endpoint(ws: WebSocket):
                 break
             # Handle WebSocket protocol-level ping/pong frames
             elif msg_type == "websocket.ping":
-                # FastAPI/Starlette automatically sends pong response
-                # Just need to acknowledge receipt to keep connection alive
+                # Must explicitly send pong response
+                await ws.send({"type": "websocket.pong"})
                 continue
             elif msg_type == "websocket.pong":
                 # Received pong response (from our keepalive ping or client's response)
