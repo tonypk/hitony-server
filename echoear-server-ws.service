@@ -1,0 +1,16 @@
+[Unit]
+Description=EchoEar WebSocket Server (websockets library)
+After=network.target
+
+[Service]
+Type=simple
+User=anna
+WorkingDirectory=/home/anna/echoear-server
+ExecStart=/home/anna/echoear-server/venv/bin/python3 run_server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
