@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=anna
-WorkingDirectory=/home/anna/echoear-server
-ExecStart=/home/anna/echoear-server/venv/bin/python3 run_server.py
+User=tonypk25
+WorkingDirectory=/home/tonypk25/echoear-server
+ExecStart=/home/tonypk25/echoear-server/venv/bin/python3 run_server.py
 Restart=always
 RestartSec=5
 StandardOutput=journal
