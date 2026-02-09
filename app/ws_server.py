@@ -83,7 +83,8 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
     # TTS - now returns Opus packets
     try:
         opus_packets = await synthesize_tts(reply)
-        logger.info(f"TTS synthesized {len(opus_packets)} Opus packets")
+        packet_sizes = [len(p) for p in opus_packets[:10]]
+        logger.info(f"TTS synthesized {len(opus_packets)} Opus packets, first 10 sizes: {packet_sizes}")
     except Exception as e:
         logger.error(f"TTS failed: {e}")
         await ws.send(json.dumps({"type": "error", "message": f"TTS failed: {e}"}))
