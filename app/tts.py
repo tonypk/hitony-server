@@ -35,5 +35,11 @@ async def synthesize_tts(text: str) -> bytes:
         opus_packet = encoder.encode(frame, 960)  # 960 samples per 60ms frame
         opus_packets.append(opus_packet)
 
+        # Debug: log first few packet sizes
+        if len(opus_packets) <= 3:
+            print(f"DEBUG: Opus packet {len(opus_packets)}: {len(opus_packet)} bytes (from {len(frame)} bytes PCM)")
+
+    print(f"DEBUG: Total {len(opus_packets)} packets, sizes: {[len(p) for p in opus_packets[:5]]}")
+
     # Return list of Opus packets (not concatenated - send individually)
     return opus_packets
