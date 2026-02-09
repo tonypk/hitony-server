@@ -77,8 +77,8 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
         logger.info(f"LLM reply: {reply}")
     except Exception as e:
         logger.warning(f"OpenClaw failed: {e}, using test response")
-        # Fallback: return a test response
-        reply = f"收到了，你说的是：{text}"
+        # Fallback: return a test response (English for better TTS quality)
+        reply = "OK, I got it"
 
     # TTS
     try:
