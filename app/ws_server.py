@@ -134,6 +134,12 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
 
     await ws.send(json.dumps({"type": "asr_text", "text": text}))
 
+    # Skip LLM+TTS if ASR returned empty text (noise/silence)
+    if not text or text.strip() == "":
+        logger.info(f"[{state.session_id}] ASR returned empty text, skipping LLM+TTS")
+        state.processing = False
+        return
+
     # Check abort before LLM
     if state.tts_abort:
         logger.info(f"[{state.session_id}] Aborted before LLM")
