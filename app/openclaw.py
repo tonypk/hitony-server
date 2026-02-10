@@ -9,17 +9,36 @@ _client = AsyncOpenAI(
     base_url=settings.openai_base_url,
 )
 
-_conversation_history: list = []
+SYSTEM_PROMPT = (
+    "你是EchoEar，一个友好的语音助手。"
+    "用户说什么语言，你就必须用什么语言回复。"
+    "回答要简短精炼，适合语音播放。\n"
+    "You are EchoEar, a friendly voice assistant. "
+    "You MUST reply in the SAME language the user speaks. "
+    "If the user speaks Chinese, reply in Chinese. If English, reply in English. "
+    "Keep answers short and concise for voice output."
+)
 
-SYSTEM_PROMPT = "You are EchoEar, a friendly voice assistant. Always reply in the same language the user speaks. Keep your answers short and concise, suitable for voice output."
+# Per-session conversation histories keyed by session_id
+_sessions: dict[str, list] = {}
 
 
-async def call_openclaw(text: str) -> str:
+def reset_conversation(session_id: str):
+    """Reset conversation history for a session"""
+    _sessions.pop(session_id, None)
+    logger.info(f"Conversation reset for session {session_id}")
+
+
+async def call_openclaw(text: str, session_id: str = "default") -> str:
     """Chat with OpenAI GPT model"""
-    _conversation_history.append({"role": "user", "content": text})
+    if session_id not in _sessions:
+        _sessions[session_id] = []
+
+    history = _sessions[session_id]
+    history.append({"role": "user", "content": text})
 
     # Keep last 10 messages to avoid token overflow
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + _conversation_history[-10:]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-10:]
 
     response = await _client.chat.completions.create(
         model=settings.openai_chat_model,
@@ -28,7 +47,7 @@ async def call_openclaw(text: str) -> str:
     )
 
     reply = response.choices[0].message.content.strip()
-    _conversation_history.append({"role": "assistant", "content": reply})
+    history.append({"role": "assistant", "content": reply})
 
-    logger.info(f"LLM: '{text}' -> '{reply}'")
+    logger.info(f"LLM [{session_id}]: '{text}' -> '{reply}'")
     return reply

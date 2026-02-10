@@ -13,7 +13,7 @@ from .protocol import AsrText, TtsStart, TtsEnd, ErrorMsg
 from .registry import registry
 from .asr import transcribe_pcm
 from .tts import synthesize_tts
-from .openclaw import call_openclaw
+from .openclaw import call_openclaw, reset_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
 
     # LLM via OpenAI GPT
     try:
-        reply = await call_openclaw(text)
+        reply = await call_openclaw(text, session_id=state.session_id)
         logger.info(f"[{state.session_id}] LLM reply: {reply}")
     except Exception as e:
         logger.error(f"[{state.session_id}] LLM failed: {e}", exc_info=True)
@@ -230,6 +230,7 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
     finally:
         # Clean abort on disconnect
         state.tts_abort = True
+        reset_conversation(state.session_id)
         logger.info(f"[{state.session_id}] Session ended for device {device_id}")
 
 
