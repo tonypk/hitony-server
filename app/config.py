@@ -9,14 +9,10 @@ class Settings(BaseModel):
     # Device auth
     device_token_header: str = "x-device-token"
 
-    # OpenClaw
-    openclaw_url: str = os.getenv("OPENCLAW_URL", "http://localhost:18789/v1/responses")
-    openclaw_token: str = os.getenv("OPENCLAW_TOKEN", "")
-    openclaw_model: str = os.getenv("OPENCLAW_MODEL", "openclaw:main")
-
     # OpenAI API
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
     openai_asr_model: str = os.getenv("OPENAI_ASR_MODEL", "whisper-1")
     openai_tts_model: str = os.getenv("OPENAI_TTS_MODEL", "tts-1")
     openai_tts_voice: str = os.getenv("OPENAI_TTS_VOICE", "alloy")
