@@ -18,15 +18,7 @@ OPENCLAW_CFG_PATH = os.path.join(DATA_DIR, "openclaw.json")
 
 @app.on_event("startup")
 async def load_openclaw_config():
-    if os.path.exists(OPENCLAW_CFG_PATH):
-        try:
-            with open(OPENCLAW_CFG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            settings.openclaw_url = data.get("openclaw_url", settings.openclaw_url)
-            settings.openclaw_token = data.get("openclaw_token", settings.openclaw_token)
-            settings.openclaw_model = data.get("openclaw_model", settings.openclaw_model)
-        except Exception:
-            pass
+    pass
 
 @app.get("/health")
 async def health():
