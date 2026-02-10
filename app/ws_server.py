@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Optional, List
 import websockets
@@ -211,21 +212,38 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
         state.processing = False
         return
 
-    # Stream TTS with abort checking
+    # Stream TTS with burst-then-sustain pacing for stable long playback
+    # Strategy: send first BURST_COUNT packets fast to pre-fill device buffer (~1.2s),
+    # then use drift-free absolute-time pacing at slightly faster than real-time.
     await ws.send(json.dumps({"type": "tts_start", "text": reply}))
 
+    BURST_COUNT = 20       # Pre-buffer packets (20 × 60ms = 1.2s of audio)
+    BURST_INTERVAL = 0.01  # 10ms between burst packets
+    SUSTAIN_INTERVAL = 0.05  # 50ms sustain (vs 60ms real-time = 10ms margin)
+
     sent_count = 0
-    for packet in opus_packets:
+    t0 = time.monotonic()
+
+    for i, packet in enumerate(opus_packets):
         if state.tts_abort:
             logger.info(f"[{state.session_id}] TTS aborted after {sent_count}/{len(opus_packets)} packets")
             break
         await ws.send(packet)
         sent_count += 1
-        await asyncio.sleep(0.06)  # Match 60ms Opus frame duration for realtime playback
+
+        # Drift-free pacing using absolute time targets
+        if i < BURST_COUNT:
+            target = t0 + (i + 1) * BURST_INTERVAL
+        else:
+            target = t0 + BURST_COUNT * BURST_INTERVAL + (i + 1 - BURST_COUNT) * SUSTAIN_INTERVAL
+        sleep_time = target - time.monotonic()
+        if sleep_time > 0:
+            await asyncio.sleep(sleep_time)
 
     if not state.tts_abort:
         await ws.send(json.dumps({"type": "tts_end"}))
-        logger.info(f"[{state.session_id}] TTS complete: {sent_count} packets sent")
+        elapsed = time.monotonic() - t0
+        logger.info(f"[{state.session_id}] TTS complete: {sent_count} packets in {elapsed:.1f}s")
     else:
         logger.info(f"[{state.session_id}] TTS aborted, sent tts_end already via abort handler")
 
