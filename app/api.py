@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_db
-from .models import User, Device, UserSettings
+from .models import User, Device, UserSettings, Reminder
 from .auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, hash_token, encrypt_secret, decrypt_secret,
@@ -229,4 +229,47 @@ async def update_settings(
 
     await db.commit()
     logger.info(f"Settings updated for user {user.email}")
+    return {"ok": True}
+
+
+# ── Reminders ────────────────────────────────────────────────
+
+class ReminderOut(BaseModel):
+    id: int
+    device_id: str
+    remind_at: datetime
+    message: str
+    delivered: int  # 0=pending, 1=delivered, 2=failed
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/reminders", response_model=List[ReminderOut])
+async def list_reminders(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Reminder)
+        .where(Reminder.user_id == user.id)
+        .order_by(Reminder.remind_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.delete("/reminders/{reminder_id}")
+async def delete_reminder(
+    reminder_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == user.id)
+    )
+    reminder = result.scalar_one_or_none()
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    await db.delete(reminder)
+    await db.commit()
     return {"ok": True}

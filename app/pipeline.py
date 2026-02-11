@@ -9,6 +9,7 @@ import json
 import logging
 import struct
 import time
+from datetime import datetime
 from typing import Optional, Tuple, List
 
 import opuslib
@@ -195,6 +196,8 @@ async def _process_and_speak(ws, session, text: str):
         elif action == "music":
             await _play_music(ws, session, intent)
             return
+        elif action == "remind":
+            reply = await _handle_remind(session, intent)
         elif action == "music_stop":
             # Stop any active music
             if session.music_playing:
@@ -235,6 +238,44 @@ async def _process_and_speak(ws, session, text: str):
         return
 
     await _send_tts_round(ws, session, opus_packets, reply)
+
+
+async def _handle_remind(session: Session, intent: dict) -> str:
+    """Handle REMIND intent: parse datetime, save to DB, return confirmation."""
+    sid = session.session_id
+    dt_str = intent.get("datetime", "")
+    message = intent.get("message", "Reminder")
+    reply = intent.get("response", "Reminder set.")
+
+    try:
+        remind_at = datetime.fromisoformat(dt_str)
+    except (ValueError, TypeError):
+        logger.warning(f"[{sid}] Invalid remind datetime: {dt_str}")
+        return "Sorry, I couldn't understand that date. Please try again."
+
+    if remind_at < datetime.now():
+        logger.warning(f"[{sid}] Remind datetime in past: {dt_str}")
+        return "That time has already passed. Please set a future reminder."
+
+    try:
+        from .database import async_session_factory
+        from .models import Reminder
+
+        async with async_session_factory() as db:
+            reminder = Reminder(
+                user_id=session.config.user_id if session.config.user_id else None,
+                device_id=session.device_id,
+                remind_at=remind_at,
+                message=message,
+            )
+            db.add(reminder)
+            await db.commit()
+            logger.info(f"[{sid}] Reminder saved: '{message}' at {remind_at}")
+    except Exception as e:
+        logger.error(f"[{sid}] Failed to save reminder: {e}")
+        return "Sorry, I couldn't save the reminder. Please try again."
+
+    return reply
 
 
 async def _play_music(ws, session, intent: dict):

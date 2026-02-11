@@ -1,6 +1,7 @@
 """Two-stage LLM orchestrator: OpenAI intent planning + OpenClaw execution"""
 import json
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional
 from openai import AsyncOpenAI
 from .config import settings
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 _conversations: Dict[str, List[dict]] = {}
 
 INTENT_PROMPT = """You are EchoEar, a smart voice assistant. Analyze the user's request and respond in JSON.
+Today's date/time: {current_datetime}
 
 Modes:
 1. CHAT — questions, conversations, information you can answer directly
@@ -20,6 +22,7 @@ Modes:
 3. MUSIC — user wants to play music (from YouTube or a URL)
 4. MUSIC_STOP — user wants to stop currently playing music
 5. MUSIC_PAUSE — user wants to pause currently playing music
+6. REMIND — user wants to set a reminder for a specific date/time
 
 Response format:
 - Chat: {"action": "chat", "response": "your answer"}
@@ -27,6 +30,13 @@ Response format:
 - Music: {"action": "music", "query": "search query or URL", "reply_hint": "Playing [song description]"}
 - Music stop: {"action": "music_stop", "response": "Music stopped."}
 - Music pause: {"action": "music_pause", "response": "Music paused."}
+- Remind: {"action": "remind", "datetime": "YYYY-MM-DDTHH:MM:SS", "message": "reminder text", "response": "confirmation message"}
+
+Reminder rules:
+- Parse the date/time relative to today. If no time specified, default to 09:00.
+- "datetime" must be ISO format: "2026-02-15T09:00:00"
+- "message" is the reminder content (e.g. "You have an interview")
+- "response" is a friendly confirmation to speak back
 
 Examples:
 - "What's the weather?" → {"action": "chat", "response": "I don't have real-time weather data, but you can check your weather app."}
@@ -35,6 +45,9 @@ Examples:
 - "Play Bohemian Rhapsody" → {"action": "music", "query": "Bohemian Rhapsody Queen", "reply_hint": "Playing Bohemian Rhapsody"}
 - "停止播放" → {"action": "music_stop", "response": "Music stopped."}
 - "暂停" → {"action": "music_pause", "response": "Music paused."}
+- "提醒我2月15号有面试" → {"action": "remind", "datetime": "2026-02-15T09:00:00", "message": "你有面试", "response": "好的，已设置2月15号早上9点提醒你有面试。"}
+- "Remind me to call mom tomorrow at 3pm" → {"action": "remind", "datetime": "2026-02-12T15:00:00", "message": "Call mom", "response": "Got it, I'll remind you tomorrow at 3 PM to call mom."}
+- "5分钟后提醒我吃药" → {"action": "remind", "datetime": "2026-02-11T14:35:00", "message": "吃药", "response": "好的，5分钟后提醒你吃药。"}
 - "Hi, how are you?" → {"action": "chat", "response": "Hi! I'm doing great, how can I help you today?"}
 
 IMPORTANT: Always respond with valid JSON only. No markdown, no code blocks."""
@@ -72,7 +85,9 @@ async def plan_intent(text: str, session_id: str, session: Optional[Session] = N
     if len(history) > 20:
         history[:] = history[-20:]
 
-    messages = [{"role": "system", "content": INTENT_PROMPT}] + history
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
+    system_prompt = INTENT_PROMPT.replace("{current_datetime}", now_str)
+    messages = [{"role": "system", "content": system_prompt}] + history
 
     chat_model = (session.config.get("openai_chat_model", settings.intent_model)
                   if session else settings.intent_model)

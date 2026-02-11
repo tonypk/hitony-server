@@ -15,6 +15,7 @@ import asyncio
 import logging
 import uvicorn
 from app.ws_server import start_websocket_server
+from app.scheduler import start_reminder_scheduler
 from app.config import settings
 
 logging.basicConfig(
@@ -45,16 +46,17 @@ async def main():
     logger.info(f"HTTP admin server will run on http://0.0.0.0:8000")
     logger.info(f"WebSocket server will run on ws://{settings.ws_host}:{settings.ws_port}")
 
-    # return_exceptions=True: HTTP failure won't kill WebSocket server
+    # return_exceptions=True: one failure won't kill the others
     results = await asyncio.gather(
         start_websocket_server(),
         run_http_server(),
+        start_reminder_scheduler(),
         return_exceptions=True,
     )
+    names = ["WebSocket", "HTTP admin", "Reminder scheduler"]
     for i, r in enumerate(results):
         if isinstance(r, Exception):
-            name = "WebSocket" if i == 0 else "HTTP admin"
-            logger.error(f"{name} server exited with error: {r}")
+            logger.error(f"{names[i]} exited with error: {r}")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -54,3 +54,17 @@ class UserSettings(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     owner = relationship("User", back_populates="settings")
+
+
+class Reminder(Base):
+    __tablename__ = "reminders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    device_id = Column(String(64), nullable=False)
+    remind_at = Column(DateTime, nullable=False)
+    message = Column(Text, nullable=False)
+    delivered = Column(Integer, default=0)  # 0=pending, 1=delivered, 2=failed
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    owner = relationship("User")

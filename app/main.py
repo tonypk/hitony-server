@@ -164,6 +164,7 @@ _ADMIN_HTML = """<!doctype html>
 
   <div class="tabs">
     <div class="tab active" onclick="showTab('devices')">Devices</div>
+    <div class="tab" onclick="showTab('reminders')">Reminders</div>
     <div class="tab" onclick="showTab('settings')">Settings</div>
     <div class="tab" onclick="logout()">Logout</div>
   </div>
@@ -188,6 +189,19 @@ _ADMIN_HTML = """<!doctype html>
         <tbody id="dev-tbody"></tbody>
       </table>
       <p id="dev-empty" class="text-sm mt text-center hidden">No devices yet</p>
+    </div>
+  </div>
+
+  <!-- REMINDERS TAB -->
+  <div id="tab-reminders" class="hidden">
+    <div class="card">
+      <h3>My Reminders</h3>
+      <div id="rem-msg" class="msg"></div>
+      <table>
+        <thead><tr><th>Time</th><th>Message</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rem-tbody"></tbody>
+      </table>
+      <p id="rem-empty" class="text-sm mt text-center hidden">No reminders yet. Say "remind me..." to your EchoEar device!</p>
     </div>
   </div>
 
@@ -268,6 +282,7 @@ function enterApp() {
   document.getElementById('app-page').classList.remove('hidden');
   document.getElementById('user-email').textContent = localStorage.getItem('echoear_email') || '';
   loadDevices();
+  loadReminders();
   loadSettings();
 }
 
@@ -325,6 +340,36 @@ async function delDevice(id) {
   } catch(e) { showMsg('dev-msg', e.message, true); }
 }
 
+// ── Reminders ──
+async function loadReminders() {
+  try {
+    const reminders = await api('/api/reminders');
+    const tbody = document.getElementById('rem-tbody');
+    const empty = document.getElementById('rem-empty');
+    tbody.innerHTML = '';
+    if (reminders.length === 0) { empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    reminders.forEach(r => {
+      const dt = new Date(r.remind_at).toLocaleString();
+      const status = r.delivered === 0 ? 'Pending' : r.delivered === 1 ? 'Delivered' : 'Failed';
+      const statusCls = r.delivered === 0 ? 'color:#d97706' : r.delivered === 1 ? 'color:#16a34a' : 'color:#dc2626';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${dt}</td><td>${r.message}</td><td style="${statusCls}">${status}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="delReminder(${r.id})">Delete</button></td>`;
+      tbody.appendChild(tr);
+    });
+  } catch(e) { showMsg('rem-msg', e.message, true); }
+}
+
+async function delReminder(id) {
+  if (!confirm('Delete this reminder?')) return;
+  try {
+    await api('/api/reminders/' + id, 'DELETE');
+    showMsg('rem-msg', 'Reminder deleted', false);
+    await loadReminders();
+  } catch(e) { showMsg('rem-msg', e.message, true); }
+}
+
 // ── Settings ──
 async function loadSettings() {
   try {
@@ -370,6 +415,7 @@ function showTab(name) {
   document.getElementById('tab-' + name).classList.remove('hidden');
   document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
   event.target.classList.add('active');
+  if (name === 'reminders') loadReminders();
 }
 
 // ── Utils ──

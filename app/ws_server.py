@@ -24,6 +24,23 @@ from .auth import verify_token, decrypt_secret
 
 logger = logging.getLogger(__name__)
 
+# Active device connections: device_id → (ws, session)
+# Used by reminder scheduler to push TTS to online devices
+_active_connections: dict[str, tuple[WebSocketServerProtocol, Session]] = {}
+
+
+def get_active_connection(device_id: str):
+    """Get active WS connection for a device. Returns (ws, session) or None."""
+    entry = _active_connections.get(device_id)
+    if entry and not entry[0].closed:
+        return entry
+    return None
+
+
+def get_all_active_devices() -> list[str]:
+    """Get list of currently connected device IDs."""
+    return [did for did, (ws, _) in _active_connections.items() if not ws.closed]
+
 
 async def handle_text_message(ws: WebSocketServerProtocol, session: Session, text: str):
     """Route incoming JSON messages."""
@@ -221,6 +238,9 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
     else:
         logger.info(f"[{session.session_id}] Device {device_id} authenticated via legacy registry")
 
+    # Register active connection for server-push (reminders, etc.)
+    _active_connections[device_id] = (ws, session)
+
     try:
         async for message in ws:
             if isinstance(message, str):
@@ -235,6 +255,7 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
     except Exception as e:
         logger.error(f"[{session.session_id}] Error handling device {device_id}: {e}", exc_info=True)
     finally:
+        _active_connections.pop(device_id, None)
         session.tts_abort = True
         session.music_abort = True
         session._music_pause_event.set()  # Unblock music if paused
