@@ -20,7 +20,9 @@ from .llm import call_llm, reset_conversation
 logger = logging.getLogger(__name__)
 
 # Send timeout for ws.send() — prevents hanging if client is slow to read
-WS_SEND_TIMEOUT = 5.0  # seconds
+# Reduced from 5s to 2s: phone hotspot TCP can stall; 3 consecutive timeouts
+# at 5s = 15s total, but device SPEAKING timeout is only 5s. At 2s, 3 timeouts = 6s.
+WS_SEND_TIMEOUT = 2.0  # seconds
 
 
 class ConnState:
@@ -210,6 +212,9 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
 async def _process_audio_inner(ws, state, pipeline_t0):
     """Inner pipeline logic, separated for clean finally handling."""
 
+    logger.info(f"[{state.session_id}] Pipeline start: {len(state.opus_packets)} opus packets, "
+                f"abort={state.tts_abort}, closed={ws.closed}, listening={state.listening}")
+
     # Decode Opus packets to raw PCM
     t0 = time.monotonic()
     try:
@@ -283,7 +288,8 @@ async def _process_audio_inner(ws, state, pipeline_t0):
         logger.error(f"[{state.session_id}] Failed to send tts_start, aborting TTS")
         return
 
-    logger.info(f"[{state.session_id}] TTS stream start: {len(opus_packets)} packets")
+    logger.info(f"[{state.session_id}] TTS stream start: {len(opus_packets)} packets, "
+                f"abort={state.tts_abort}, closed={ws.closed}, processing={state.processing}")
 
     BURST_COUNT = 20       # Pre-buffer packets (20 x 60ms = 1.2s of audio)
     BURST_INTERVAL = 0.01  # 10ms between burst packets
@@ -302,21 +308,30 @@ async def _process_audio_inner(ws, state, pipeline_t0):
             logger.warning(f"[{state.session_id}] WS closed at TTS packet {sent_count}/{len(opus_packets)}")
             break
 
+        send_t0 = time.monotonic()
         ok = await _ws_send_safe(ws, packet, state, f"pkt#{i}")
+        send_dt = time.monotonic() - send_t0
+
         if ok:
             sent_count += 1
             send_errors = 0
+            # Log slow sends (>100ms) as warnings — indicates TCP backpressure
+            if send_dt > 0.1:
+                logger.warning(f"[{state.session_id}] Slow send pkt#{i}: {send_dt:.3f}s ({len(packet)}B)")
         else:
             send_errors += 1
+            logger.error(f"[{state.session_id}] Send FAILED pkt#{i} after {send_dt:.3f}s "
+                        f"(consecutive_errors={send_errors}, abort={state.tts_abort}, closed={ws.closed})")
             if send_errors >= 3:
                 logger.error(f"[{state.session_id}] 3 consecutive send errors at packet {i}, aborting TTS")
                 break
             await asyncio.sleep(0.01)
             continue
 
-        # Log progress
-        if sent_count <= 3 or sent_count % 20 == 0:
-            logger.info(f"[{state.session_id}] TTS sent #{sent_count}/{len(opus_packets)} ({len(packet)}B)")
+        # Log progress (first 5 packets individually for debugging 5-packet issue)
+        if sent_count <= 5 or sent_count % 20 == 0:
+            logger.info(f"[{state.session_id}] TTS sent #{sent_count}/{len(opus_packets)} "
+                       f"({len(packet)}B, send={send_dt*1000:.1f}ms)")
 
         # Drift-free pacing
         if i < BURST_COUNT:
