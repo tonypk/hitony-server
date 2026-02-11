@@ -1,7 +1,13 @@
-"""ASR → LLM → TTS pipeline with rate-controlled audio streaming."""
+"""ASR → LLM → TTS pipeline with batched audio streaming.
+
+Batching reduces TCP segments through phone hotspot: instead of 117 individual
+WebSocket messages (one per Opus packet), we send ~12 batched messages (10 packets
+each). Each batch is ~2KB — fits in one TCP segment and one ESP32 WS buffer read.
+"""
 import asyncio
 import json
 import logging
+import struct
 import time
 from typing import Optional, Tuple, List
 
@@ -10,10 +16,10 @@ from websockets.server import WebSocketServerProtocol
 
 from .config import settings
 from .session import Session
-from .audio_rate_ctrl import AudioRateController
 from .asr import transcribe_pcm
 from .tts import synthesize_tts
-from .llm import call_llm
+from .llm import call_llm, plan_intent, call_llm_chat
+from .openclaw import execute_task, is_configured as openclaw_configured
 
 logger = logging.getLogger(__name__)
 
@@ -51,34 +57,21 @@ async def run_pipeline(ws: WebSocketServerProtocol, session: Session):
         keepalive_task = asyncio.create_task(_keepalive_pings(ws, session))
 
         try:
-            result = await _process_asr_llm_tts(ws, session)
+            # Phase 1: Decode + ASR + Intent planning
+            asr_result = await _decode_and_asr(ws, session)
+            if asr_result is None:
+                return
+
+            text = asr_result
+
+            # Phase 2: LLM intent → optional hint TTS → optional OpenClaw → result TTS
+            await _process_and_speak(ws, session, text)
         finally:
             keepalive_task.cancel()
             try:
                 await keepalive_task
             except asyncio.CancelledError:
                 pass
-
-        if result is None:
-            return
-
-        opus_packets, reply_text = result
-
-        # Send tts_start
-        ok = await ws_send_safe(ws, json.dumps({"type": "tts_start", "text": reply_text}), session, "tts_start")
-        if not ok:
-            logger.error(f"[{session.session_id}] Failed to send tts_start, aborting")
-            return
-
-        # Stream with rate control
-        sent = await _stream_with_rate_control(ws, session, opus_packets)
-
-        # Send tts_end
-        if not session.tts_abort:
-            await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
-            logger.info(f"[{session.session_id}] TTS complete: {sent}/{len(opus_packets)} packets")
-        else:
-            logger.info(f"[{session.session_id}] TTS aborted: {sent}/{len(opus_packets)} packets")
 
     finally:
         session.processing = False
@@ -102,11 +95,28 @@ async def _keepalive_pings(ws: WebSocketServerProtocol, session: Session):
         pass
 
 
-async def _process_asr_llm_tts(
-    ws: WebSocketServerProtocol,
-    session: Session,
-) -> Optional[Tuple[List[bytes], str]]:
-    """Run ASR → LLM → TTS synthesis. Returns (opus_packets, reply_text) or None."""
+async def _send_tts_round(ws, session, opus_packets, text):
+    """Send a complete TTS round: tts_start → batched audio → tts_end."""
+    sid = session.session_id
+
+    ok = await ws_send_safe(ws, json.dumps({"type": "tts_start", "text": text}), session, "tts_start")
+    if not ok:
+        logger.error(f"[{sid}] Failed to send tts_start")
+        return 0
+
+    sent = await _stream_batched(ws, session, opus_packets)
+
+    if not session.tts_abort:
+        await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
+        logger.info(f"[{sid}] TTS complete: {sent}/{len(opus_packets)} packets")
+    else:
+        logger.info(f"[{sid}] TTS aborted: {sent}/{len(opus_packets)} packets")
+
+    return sent
+
+
+async def _decode_and_asr(ws, session) -> Optional[str]:
+    """Decode Opus → ASR. Returns transcribed text or None."""
     sid = session.session_id
 
     logger.info(f"[{sid}] Pipeline start: {len(session.opus_packets)} opus packets")
@@ -117,7 +127,7 @@ async def _process_asr_llm_tts(
         decoder = opuslib.Decoder(settings.pcm_sample_rate, settings.pcm_channels)
         pcm_frames = []
         for packet in session.opus_packets:
-            pcm_frame = decoder.decode(packet, 960)  # 960 samples = 60ms @ 16kHz
+            pcm_frame = decoder.decode(packet, 960)
             pcm_frames.append(pcm_frame)
         pcm = b''.join(pcm_frames)
         logger.info(f"[{sid}] Opus decode: {len(session.opus_packets)} packets -> {len(pcm)} bytes ({time.monotonic()-t0:.2f}s)")
@@ -127,7 +137,6 @@ async def _process_asr_llm_tts(
         return None
 
     if session.tts_abort or ws.closed:
-        logger.info(f"[{sid}] Aborted before ASR")
         return None
 
     # --- ASR ---
@@ -146,58 +155,140 @@ async def _process_asr_llm_tts(
         logger.info(f"[{sid}] ASR empty, skipping LLM+TTS")
         return None
 
-    if session.tts_abort or ws.closed:
-        logger.info(f"[{sid}] Aborted before LLM")
-        return None
+    return text
 
-    # --- LLM ---
-    t0 = time.monotonic()
-    try:
-        reply = await call_llm(text, session_id=sid)
-        logger.info(f"[{sid}] LLM: '{reply}' ({time.monotonic()-t0:.2f}s)")
-    except Exception as e:
-        logger.error(f"[{sid}] LLM failed: {e}", exc_info=True)
-        await ws_send_safe(ws, json.dumps({"type": "error", "message": f"LLM failed: {e}"}), session)
-        return None
+
+async def _process_and_speak(ws, session, text: str):
+    """Intent planning → optional hint TTS → OpenClaw/chat → result TTS.
+
+    For EXECUTE intents: immediately speaks the hint (e.g. "Searching for news...")
+    so the user gets feedback while OpenClaw works (30-90s).
+    """
+    sid = session.session_id
 
     if session.tts_abort or ws.closed:
-        logger.info(f"[{sid}] Aborted before TTS")
-        return None
+        return
 
-    # --- TTS synthesis ---
-    t0 = time.monotonic()
+    # --- Intent planning (fast, ~1s) ---
+    if openclaw_configured():
+        t0 = time.monotonic()
+        intent = await plan_intent(text, session_id=sid)
+        action = intent.get("action", "chat")
+        logger.info(f"[{sid}] Intent: {action} ({time.monotonic()-t0:.2f}s)")
+
+        if action == "execute":
+            hint = intent.get("reply_hint", "Processing your request...")
+            task = intent.get("task", text)
+
+            # --- Phase 1: Speak the hint immediately ---
+            logger.info(f"[{sid}] Hint TTS: '{hint}'")
+            try:
+                hint_packets = await synthesize_tts(hint)
+                await _send_tts_round(ws, session, hint_packets, hint)
+            except Exception as e:
+                logger.warning(f"[{sid}] Hint TTS failed: {e}")
+
+            if session.tts_abort or ws.closed:
+                return
+
+            # --- Phase 2: Execute OpenClaw (slow, 10-90s) ---
+            t0 = time.monotonic()
+            try:
+                result = await execute_task(task)
+                logger.info(f"[{sid}] OpenClaw: '{result[:80]}' ({time.monotonic()-t0:.1f}s)")
+            except Exception as e:
+                logger.error(f"[{sid}] OpenClaw failed: {e}")
+                result = "Sorry, I couldn't complete that task right now."
+
+            if session.tts_abort or ws.closed:
+                return
+
+            reply = result
+        else:
+            reply = intent.get("response", "I'm not sure how to help with that.")
+    else:
+        # Simple chat mode (no OpenClaw)
+        t0 = time.monotonic()
+        try:
+            reply = await call_llm_chat(text, session_id=sid)
+            logger.info(f"[{sid}] LLM chat: '{reply}' ({time.monotonic()-t0:.2f}s)")
+        except Exception as e:
+            logger.error(f"[{sid}] LLM failed: {e}", exc_info=True)
+            await ws_send_safe(ws, json.dumps({"type": "error", "message": f"LLM failed: {e}"}), session)
+            return
+
+    if session.tts_abort or ws.closed:
+        return
+
+    # --- Final TTS: speak the result ---
     try:
         opus_packets = await synthesize_tts(reply)
-        logger.info(f"[{sid}] TTS synth: {len(opus_packets)} packets ({time.monotonic()-t0:.2f}s)")
+        logger.info(f"[{sid}] TTS synth: {len(opus_packets)} packets")
     except Exception as e:
         logger.error(f"[{sid}] TTS synth failed: {e}")
         await ws_send_safe(ws, json.dumps({"type": "error", "message": f"TTS failed: {e}"}), session)
-        return None
+        return
 
     if session.tts_abort or ws.closed:
-        logger.info(f"[{sid}] Aborted before TTS stream")
-        return None
+        return
 
-    return (opus_packets, reply)
+    await _send_tts_round(ws, session, opus_packets, reply)
 
 
-async def _stream_with_rate_control(
+BATCH_SIZE = 10       # 10 opus packets per WS message (~2KB, fits in one TCP segment)
+BATCH_INTERVAL = 0.5  # 500ms between batches (10×60ms=600ms audio per batch = 1.2× real-time)
+
+
+async def _stream_batched(
     ws: WebSocketServerProtocol,
     session: Session,
     opus_packets: List[bytes],
 ) -> int:
-    """Send Opus packets at real-time playback rate using AudioRateController."""
+    """Send Opus packets in batches to reduce TCP segments through phone hotspot.
+
+    Format per WS binary message: [2B BE len][data][2B BE len][data]...
+    Device parses length-prefixed packets from each batch.
+    """
     sid = session.session_id
+    total = len(opus_packets)
+    num_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
 
-    ctrl = AudioRateController(frame_duration_ms=settings.frame_duration_ms)
-    ctrl.add_all(opus_packets)
+    logger.info(f"[{sid}] TTS stream: {total} packets in {num_batches} batches "
+                f"(batch_size={BATCH_SIZE}, interval={BATCH_INTERVAL}s)")
 
-    logger.info(f"[{sid}] TTS stream start: {len(opus_packets)} packets at {settings.frame_duration_ms}ms intervals")
+    sent = 0
+    t0 = time.monotonic()
 
-    async def send_one(packet: bytes) -> bool:
-        return await ws_send_safe(ws, packet, session, f"tts_pkt")
+    for batch_idx in range(num_batches):
+        if session.tts_abort or ws.closed:
+            logger.info(f"[{sid}] TTS aborted at batch {batch_idx}/{num_batches}")
+            break
 
-    def should_abort() -> bool:
-        return session.tts_abort or ws.closed
+        start = batch_idx * BATCH_SIZE
+        batch = opus_packets[start:start + BATCH_SIZE]
 
-    return await ctrl.drain(send_one, should_abort)
+        # Pack: [2-byte BE length][opus data] for each packet
+        blob = b''
+        for pkt in batch:
+            blob += struct.pack('>H', len(pkt)) + pkt
+
+        send_t0 = time.monotonic()
+        ok = await ws_send_safe(ws, blob, session, f"batch#{batch_idx}")
+        send_dt = time.monotonic() - send_t0
+
+        if ok:
+            sent += len(batch)
+            logger.info(f"[{sid}] Batch {batch_idx}/{num_batches}: "
+                        f"{len(batch)} pkts, {len(blob)}B, send={send_dt*1000:.0f}ms")
+        else:
+            logger.error(f"[{sid}] Batch {batch_idx} send FAILED after {send_dt:.1f}s")
+            break
+
+        # Pace between batches (skip after last batch)
+        if batch_idx < num_batches - 1:
+            await asyncio.sleep(BATCH_INTERVAL)
+
+    elapsed = time.monotonic() - t0
+    logger.info(f"[{sid}] TTS batched: {sent}/{total} in {elapsed:.1f}s "
+                f"({num_batches} batches)")
+    return sent
