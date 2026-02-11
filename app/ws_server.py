@@ -223,30 +223,45 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
     SUSTAIN_INTERVAL = 0.05  # 50ms sustain (vs 60ms real-time = 10ms margin)
 
     sent_count = 0
+    send_errors = 0
     t0 = time.monotonic()
 
-    try:
-        for i, packet in enumerate(opus_packets):
-            if state.tts_abort:
-                logger.info(f"[{state.session_id}] TTS aborted after {sent_count}/{len(opus_packets)} packets")
-                break
+    for i, packet in enumerate(opus_packets):
+        if state.tts_abort:
+            logger.info(f"[{state.session_id}] TTS aborted after {sent_count}/{len(opus_packets)} packets")
+            break
+
+        # 检查连接是否仍然活跃
+        if ws.closed:
+            logger.warning(f"[{state.session_id}] WS closed during TTS after {sent_count}/{len(opus_packets)} packets")
+            break
+
+        try:
             await ws.send(packet)
             sent_count += 1
+            send_errors = 0  # 重置连续错误计数
+        except Exception as e:
+            send_errors += 1
+            logger.error(f"[{state.session_id}] TTS send error #{send_errors} at packet {i}/{len(opus_packets)}: {type(e).__name__}: {e}")
+            if send_errors >= 3:
+                logger.error(f"[{state.session_id}] Too many consecutive send errors, aborting TTS")
+                break
+            # 单次错误：短暂等待后继续尝试下一个包
+            await asyncio.sleep(0.01)
+            continue
 
-            # Log progress: first 3, then every 20
-            if sent_count <= 3 or sent_count % 20 == 0:
-                logger.info(f"[{state.session_id}] TTS sent #{sent_count}/{len(opus_packets)} ({len(packet)} bytes)")
+        # Log progress: first 3, then every 20
+        if sent_count <= 3 or sent_count % 20 == 0:
+            logger.info(f"[{state.session_id}] TTS sent #{sent_count}/{len(opus_packets)} ({len(packet)} bytes)")
 
-            # Drift-free pacing using absolute time targets
-            if i < BURST_COUNT:
-                target = t0 + (i + 1) * BURST_INTERVAL
-            else:
-                target = t0 + BURST_COUNT * BURST_INTERVAL + (i + 1 - BURST_COUNT) * SUSTAIN_INTERVAL
-            sleep_time = target - time.monotonic()
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
-    except Exception as e:
-        logger.error(f"[{state.session_id}] TTS send error after {sent_count}/{len(opus_packets)} packets: {e}", exc_info=True)
+        # Drift-free pacing using absolute time targets
+        if i < BURST_COUNT:
+            target = t0 + (i + 1) * BURST_INTERVAL
+        else:
+            target = t0 + BURST_COUNT * BURST_INTERVAL + (i + 1 - BURST_COUNT) * SUSTAIN_INTERVAL
+        sleep_time = target - time.monotonic()
+        if sleep_time > 0:
+            await asyncio.sleep(sleep_time)
 
     if not state.tts_abort:
         try:
@@ -254,7 +269,7 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
         except Exception as e:
             logger.error(f"[{state.session_id}] Failed to send tts_end: {e}")
         elapsed = time.monotonic() - t0
-        logger.info(f"[{state.session_id}] TTS complete: {sent_count}/{len(opus_packets)} packets in {elapsed:.1f}s")
+        logger.info(f"[{state.session_id}] TTS complete: {sent_count}/{len(opus_packets)} packets in {elapsed:.1f}s (errors: {send_errors})")
     else:
         logger.info(f"[{state.session_id}] TTS aborted, sent tts_end already via abort handler")
 
@@ -309,11 +324,12 @@ async def start_websocket_server():
         handle_client,
         settings.ws_host,
         settings.ws_port,
-        # Disable server-side pings: ESP-IDF esp_websocket_client doesn't reliably
-        # respond to server pings with pongs (especially during audio streaming).
-        # The device sends client-side pings every 10s to keep the connection alive.
+        # Disable server-side pings: device uses TCP keepalive instead
         ping_interval=None,
         ping_timeout=None,
+        # 增大写缓冲区，避免TTS burst发送时背压导致异常
+        write_limit=2**18,  # 256KB (default 64KB)
+        max_queue=64,       # 允许更多待发送消息排队
     ):
         logger.info(f"WebSocket server listening on ws://{settings.ws_host}:{settings.ws_port}/ws")
         await asyncio.Future()  # Run forever
