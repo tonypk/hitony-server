@@ -309,8 +309,11 @@ async def start_websocket_server():
         handle_client,
         settings.ws_host,
         settings.ws_port,
-        ping_interval=20,
-        ping_timeout=60,
+        # Disable server-side pings: ESP-IDF esp_websocket_client doesn't reliably
+        # respond to server pings with pongs (especially during audio streaming).
+        # The device sends client-side pings every 10s to keep the connection alive.
+        ping_interval=None,
+        ping_timeout=None,
     ):
         logger.info(f"WebSocket server listening on ws://{settings.ws_host}:{settings.ws_port}/ws")
         await asyncio.Future()  # Run forever
