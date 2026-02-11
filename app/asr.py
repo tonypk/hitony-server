@@ -42,6 +42,15 @@ def _pcm_to_wav(pcm_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
+# Whisper hallucination patterns — produced from silence/noise input
+_HALLUCINATIONS = {
+    "thank you", "thank you for watching", "thanks for watching",
+    "thanks", "bye", "goodbye", "all right", "you", "the end",
+    "subscribe", "like and subscribe", "see you next time",
+    "so", "okay", "yeah", "yes", "no", "hmm", "uh",
+}
+
+
 async def transcribe_pcm(pcm_bytes: bytes) -> str:
     """Transcribe PCM audio using OpenAI Whisper API"""
     wav_bytes = _pcm_to_wav(pcm_bytes)
@@ -53,9 +62,16 @@ async def transcribe_pcm(pcm_bytes: bytes) -> str:
     transcript = await _client.audio.transcriptions.create(
         model=settings.openai_asr_model,
         file=wav_file,
-        language="en",  # Force English to prevent misdetection (Japanese/Korean)
+        # No language forced — Whisper auto-detects (Chinese + English + others)
     )
 
     text = transcript.text.strip()
     logger.info(f"ASR result: {text}")
+
+    # Filter known Whisper hallucinations (noise/silence → fake output)
+    normalized = text.lower().rstrip(".!?,")
+    if normalized in _HALLUCINATIONS:
+        logger.warning(f"ASR: filtered hallucination: '{text}'")
+        return ""
+
     return text

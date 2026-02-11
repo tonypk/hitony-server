@@ -45,11 +45,16 @@ async def main():
     logger.info(f"HTTP admin server will run on http://0.0.0.0:8000")
     logger.info(f"WebSocket server will run on ws://{settings.ws_host}:{settings.ws_port}")
 
-    # Run both servers concurrently; HTTP failure won't kill WebSocket
-    await asyncio.gather(
+    # return_exceptions=True: HTTP failure won't kill WebSocket server
+    results = await asyncio.gather(
         start_websocket_server(),
-        run_http_server()
+        run_http_server(),
+        return_exceptions=True,
     )
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            name = "WebSocket" if i == 0 else "HTTP admin"
+            logger.error(f"{name} server exited with error: {r}")
 
 if __name__ == "__main__":
     asyncio.run(main())

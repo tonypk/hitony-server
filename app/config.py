@@ -40,8 +40,12 @@ class Settings(BaseModel):
     openai_tts_model: str = _sanitize_ascii(os.getenv("OPENAI_TTS_MODEL", "tts-1"))
     openai_tts_voice: str = _sanitize_ascii(os.getenv("OPENAI_TTS_VOICE", "alloy"))
 
-    # Intent Planning (OpenAI GPT for understanding user intent)
+    # Intent / Chat model (OpenAI GPT for understanding user intent)
     intent_model: str = _sanitize_ascii(os.getenv("INTENT_MODEL", os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")))
+    openai_chat_model: str = _sanitize_ascii(os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"))  # Used by admin panel
+
+    # Music
+    music_max_duration_s: int = int(os.getenv("MUSIC_MAX_DURATION", "600"))
 
     # OpenClaw Execution (agent that performs real-world tasks)
     openclaw_base_url: str = _sanitize_ascii(os.getenv("OPENCLAW_URL", ""))

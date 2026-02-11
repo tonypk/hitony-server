@@ -6,6 +6,8 @@ from typing import AsyncGenerator, Tuple
 
 import opuslib
 
+from .config import settings
+
 logger = logging.getLogger(__name__)
 
 FRAME_SAMPLES = 960       # 60ms @ 16kHz
@@ -40,17 +42,26 @@ async def search_and_stream(query: str) -> Tuple[str, AsyncGenerator[bytes, None
     duration = info.get("duration", 0)
     logger.info(f"Music: '{title}' ({duration}s) url={url}")
 
-    # Step 2: Stream audio via yt-dlp | ffmpeg pipe (16kHz mono PCM16)
-    cmd = (
-        f'yt-dlp -f bestaudio --no-warnings -o - "{url}" | '
-        f'ffmpeg -hide_banner -loglevel error -i pipe:0 '
-        f'-f s16le -ar 16000 -ac 1 pipe:1'
-    )
-    audio_proc = await asyncio.create_subprocess_shell(
-        cmd,
+    # Enforce max duration
+    if duration > settings.music_max_duration_s:
+        raise RuntimeError(f"Track too long ({duration}s > {settings.music_max_duration_s}s max)")
+
+    # Step 2: yt-dlp → ffmpeg pipe (no shell — avoids injection)
+    ytdlp_proc = await asyncio.create_subprocess_exec(
+        "yt-dlp", "-f", "bestaudio", "--no-warnings", "-o", "-", url,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    ffmpeg_proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", "pipe:0",
+        "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
+        stdin=ytdlp_proc.stdout,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    # Allow ytdlp_proc.stdout to be consumed by ffmpeg
+    ytdlp_proc.stdout = None
 
     async def opus_generator() -> AsyncGenerator[bytes, None]:
         encoder = opuslib.Encoder(16000, 1, opuslib.APPLICATION_AUDIO)
@@ -59,7 +70,7 @@ async def search_and_stream(query: str) -> Tuple[str, AsyncGenerator[bytes, None
 
         try:
             while True:
-                chunk = await audio_proc.stdout.read(READ_CHUNK)
+                chunk = await ffmpeg_proc.stdout.read(READ_CHUNK)
                 if not chunk:
                     break
                 buffer += chunk
@@ -73,15 +84,15 @@ async def search_and_stream(query: str) -> Tuple[str, AsyncGenerator[bytes, None
                 frame = buffer + b'\x00' * (FRAME_BYTES - len(buffer))
                 yield encoder.encode(frame, FRAME_SAMPLES)
         finally:
-            # Clean up subprocess
-            try:
-                audio_proc.terminate()
-                await asyncio.wait_for(audio_proc.wait(), timeout=3.0)
-            except (ProcessLookupError, asyncio.TimeoutError):
+            for proc in (ffmpeg_proc, ytdlp_proc):
                 try:
-                    audio_proc.kill()
-                except ProcessLookupError:
-                    pass
-            logger.info(f"Music: audio process terminated for '{title}'")
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=3.0)
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+            logger.info(f"Music: audio processes terminated for '{title}'")
 
     return title, opus_generator()
