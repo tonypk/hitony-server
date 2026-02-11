@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 import uuid
 from typing import Optional, List
 import websockets
@@ -18,6 +19,9 @@ from .llm import call_llm, reset_conversation
 
 logger = logging.getLogger(__name__)
 
+# Send timeout for ws.send() — prevents hanging if client is slow to read
+WS_SEND_TIMEOUT = 5.0  # seconds
+
 
 class ConnState:
     def __init__(self, device_id: str):
@@ -29,6 +33,23 @@ class ConnState:
         self.processing = False  # Whether currently processing audio pipeline
         self.listen_mode: Optional[str] = None  # "auto", "manual", etc.
         self.protocol_version: int = 1  # 1=legacy (audio_start/end), 2=xiaozhi (listen)
+        self._process_task: Optional[asyncio.Task] = None  # Background process_audio task
+
+
+async def _ws_send_safe(ws: WebSocketServerProtocol, data, state: ConnState, label: str = ""):
+    """Send data via WebSocket with timeout. Returns True on success."""
+    try:
+        await asyncio.wait_for(ws.send(data), timeout=WS_SEND_TIMEOUT)
+        return True
+    except asyncio.TimeoutError:
+        logger.error(f"[{state.session_id}] ws.send() timed out ({WS_SEND_TIMEOUT}s) {label}")
+        return False
+    except websockets.exceptions.ConnectionClosed as e:
+        logger.warning(f"[{state.session_id}] WS closed during send {label}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"[{state.session_id}] ws.send() failed {label}: {type(e).__name__}: {e}")
+        return False
 
 
 async def handle_text_message(ws: WebSocketServerProtocol, state: ConnState, text: str):
@@ -36,7 +57,7 @@ async def handle_text_message(ws: WebSocketServerProtocol, state: ConnState, tex
     try:
         payload = json.loads(text)
     except Exception:
-        await ws.send(json.dumps({"type": "error", "message": "invalid json"}))
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": "invalid json"}), state)
         return
 
     mtype = payload.get("type")
@@ -68,7 +89,7 @@ async def handle_text_message(ws: WebSocketServerProtocol, state: ConnState, tex
             },
             "version": state.protocol_version,
         }
-        await ws.send(json.dumps(hello_resp))
+        await _ws_send_safe(ws, json.dumps(hello_resp), state, "hello_resp")
         logger.info(f"[{state.session_id}] Hello handshake complete")
         return
 
@@ -80,7 +101,7 @@ async def handle_text_message(ws: WebSocketServerProtocol, state: ConnState, tex
 
     elif mtype == "audio_end":
         state.listening = False
-        await process_audio(ws, state)
+        _launch_process_audio(ws, state)
         return
 
     elif mtype == "listen":
@@ -107,8 +128,8 @@ async def handle_text_message(ws: WebSocketServerProtocol, state: ConnState, tex
         elif listen_state == "stop":
             # Stop listening (equivalent to audio_end)
             state.listening = False
-            logger.info(f"[{state.session_id}] Listen stop, processing audio...")
-            await process_audio(ws, state)
+            logger.info(f"[{state.session_id}] Listen stop, launching process_audio...")
+            _launch_process_audio(ws, state)
             return
 
     elif mtype == "abort":
@@ -117,12 +138,45 @@ async def handle_text_message(ws: WebSocketServerProtocol, state: ConnState, tex
         logger.info(f"[{state.session_id}] Abort requested by device (reason={reason})")
         state.tts_abort = True
         # Acknowledge abort
-        await ws.send(json.dumps({"type": "tts_end", "reason": "abort"}))
+        await _ws_send_safe(ws, json.dumps({"type": "tts_end", "reason": "abort"}), state, "abort_ack")
         return
 
     elif mtype == "ping":
-        await ws.send(json.dumps({"type": "pong"}))
+        await _ws_send_safe(ws, json.dumps({"type": "pong"}), state, "pong")
         return
+
+
+def _launch_process_audio(ws: WebSocketServerProtocol, state: ConnState):
+    """Launch process_audio as a background task so the message loop stays responsive."""
+    if state.processing:
+        logger.warning(f"[{state.session_id}] Already processing audio, ignoring new request")
+        return
+
+    # Cancel any previous task that might still be lingering
+    if state._process_task and not state._process_task.done():
+        logger.warning(f"[{state.session_id}] Cancelling previous process_audio task")
+        state._process_task.cancel()
+
+    state._process_task = asyncio.create_task(
+        _process_audio_wrapper(ws, state)
+    )
+
+
+async def _process_audio_wrapper(ws: WebSocketServerProtocol, state: ConnState):
+    """Wrapper to catch and log any unhandled exceptions from process_audio."""
+    try:
+        await process_audio(ws, state)
+    except asyncio.CancelledError:
+        logger.info(f"[{state.session_id}] process_audio cancelled")
+        state.processing = False
+    except Exception as e:
+        logger.error(f"[{state.session_id}] UNHANDLED in process_audio: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        state.processing = False
+        try:
+            await _ws_send_safe(ws, json.dumps({"type": "error", "message": f"Internal error: {e}"}), state)
+        except Exception:
+            pass
 
 
 async def handle_binary_message(ws: WebSocketServerProtocol, state: ConnState, chunk: bytes):
@@ -133,14 +187,31 @@ async def handle_binary_message(ws: WebSocketServerProtocol, state: ConnState, c
 
 
 async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
-    """Process accumulated audio: Opus decode -> ASR -> LLM -> TTS"""
+    """Process accumulated audio: Opus decode -> ASR -> LLM -> TTS
+
+    Runs as a background task (via _launch_process_audio) so the message
+    loop stays responsive and can process abort messages during TTS streaming.
+    """
     if not state.opus_packets:
-        await ws.send(json.dumps({"type": "error", "message": "empty audio"}))
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": "empty audio"}), state)
         return
 
     state.processing = True
+    pipeline_t0 = time.monotonic()
+
+    try:
+        await _process_audio_inner(ws, state, pipeline_t0)
+    finally:
+        state.processing = False
+        elapsed = time.monotonic() - pipeline_t0
+        logger.info(f"[{state.session_id}] Pipeline total: {elapsed:.1f}s")
+
+
+async def _process_audio_inner(ws, state, pipeline_t0):
+    """Inner pipeline logic, separated for clean finally handling."""
 
     # Decode Opus packets to raw PCM
+    t0 = time.monotonic()
     try:
         decoder = opuslib.Decoder(settings.pcm_sample_rate, settings.pcm_channels)
         pcm_frames = []
@@ -148,77 +219,73 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
             pcm_frame = decoder.decode(packet, 960)  # 960 samples = 60ms @ 16kHz
             pcm_frames.append(pcm_frame)
         pcm = b''.join(pcm_frames)
-        logger.info(f"[{state.session_id}] Decoded {len(state.opus_packets)} Opus packets to {len(pcm)} bytes PCM")
+        logger.info(f"[{state.session_id}] Opus decode: {len(state.opus_packets)} packets -> {len(pcm)} bytes PCM ({time.monotonic()-t0:.2f}s)")
     except Exception as e:
         logger.error(f"[{state.session_id}] Opus decode failed: {e}")
-        await ws.send(json.dumps({"type": "error", "message": f"Opus decode failed: {e}"}))
-        state.processing = False
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": f"Opus decode failed: {e}"}), state)
         return
 
-    # Check abort before ASR
-    if state.tts_abort:
-        logger.info(f"[{state.session_id}] Aborted before ASR")
-        state.processing = False
+    if state.tts_abort or ws.closed:
+        logger.info(f"[{state.session_id}] Aborted before ASR (abort={state.tts_abort}, closed={ws.closed})")
         return
 
     # ASR
+    t0 = time.monotonic()
     try:
         text = await transcribe_pcm(pcm)
-        logger.info(f"[{state.session_id}] ASR result: {text}")
+        logger.info(f"[{state.session_id}] ASR: '{text}' ({time.monotonic()-t0:.2f}s)")
     except Exception as e:
         logger.error(f"[{state.session_id}] ASR failed: {e}")
-        await ws.send(json.dumps({"type": "error", "message": f"ASR failed: {e}"}))
-        state.processing = False
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": f"ASR failed: {e}"}), state)
         return
 
-    await ws.send(json.dumps({"type": "asr_text", "text": text}))
+    await _ws_send_safe(ws, json.dumps({"type": "asr_text", "text": text}), state, "asr_text")
 
-    # Skip LLM+TTS if ASR returned empty text (noise/silence)
     if not text or text.strip() == "":
-        logger.info(f"[{state.session_id}] ASR returned empty text, skipping LLM+TTS")
-        state.processing = False
+        logger.info(f"[{state.session_id}] ASR empty, skipping LLM+TTS")
         return
 
-    # Check abort before LLM
-    if state.tts_abort:
-        logger.info(f"[{state.session_id}] Aborted before LLM")
-        state.processing = False
+    if state.tts_abort or ws.closed:
+        logger.info(f"[{state.session_id}] Aborted before LLM (abort={state.tts_abort}, closed={ws.closed})")
         return
 
-    # LLM (intent planning + optional OpenClaw execution)
+    # LLM
+    t0 = time.monotonic()
     try:
         reply = await call_llm(text, session_id=state.session_id)
-        logger.info(f"[{state.session_id}] LLM reply: {reply}")
+        logger.info(f"[{state.session_id}] LLM: '{reply}' ({time.monotonic()-t0:.2f}s)")
     except Exception as e:
         logger.error(f"[{state.session_id}] LLM failed: {e}", exc_info=True)
-        await ws.send(json.dumps({"type": "error", "message": f"LLM failed: {e}"}))
-        state.processing = False
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": f"LLM failed: {e}"}), state)
         return
 
-    # Check abort before TTS
-    if state.tts_abort:
-        logger.info(f"[{state.session_id}] Aborted before TTS")
-        state.processing = False
+    if state.tts_abort or ws.closed:
+        logger.info(f"[{state.session_id}] Aborted before TTS (abort={state.tts_abort}, closed={ws.closed})")
         return
 
-    # TTS - returns Opus packets
+    # TTS synthesis
+    t0 = time.monotonic()
     try:
         opus_packets = await synthesize_tts(reply)
-        packet_sizes = [len(p) for p in opus_packets[:10]]
-        logger.info(f"[{state.session_id}] TTS synthesized {len(opus_packets)} Opus packets, first 10 sizes: {packet_sizes}")
+        logger.info(f"[{state.session_id}] TTS synth: {len(opus_packets)} packets ({time.monotonic()-t0:.2f}s)")
     except Exception as e:
-        logger.error(f"[{state.session_id}] TTS failed: {e}")
-        await ws.send(json.dumps({"type": "error", "message": f"TTS failed: {e}"}))
-        state.processing = False
+        logger.error(f"[{state.session_id}] TTS synth failed: {e}")
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": f"TTS failed: {e}"}), state)
         return
 
-    # Stream TTS with burst-then-sustain pacing for stable long playback
-    # Strategy: send first BURST_COUNT packets fast to pre-fill device buffer (~1.2s),
-    # then use drift-free absolute-time pacing at slightly faster than real-time.
-    await ws.send(json.dumps({"type": "tts_start", "text": reply}))
-    logger.info(f"[{state.session_id}] TTS streaming start: {len(opus_packets)} packets to send")
+    if state.tts_abort or ws.closed:
+        logger.info(f"[{state.session_id}] Aborted before TTS stream (abort={state.tts_abort}, closed={ws.closed})")
+        return
 
-    BURST_COUNT = 20       # Pre-buffer packets (20 × 60ms = 1.2s of audio)
+    # --- TTS streaming ---
+    ok = await _ws_send_safe(ws, json.dumps({"type": "tts_start", "text": reply}), state, "tts_start")
+    if not ok:
+        logger.error(f"[{state.session_id}] Failed to send tts_start, aborting TTS")
+        return
+
+    logger.info(f"[{state.session_id}] TTS stream start: {len(opus_packets)} packets")
+
+    BURST_COUNT = 20       # Pre-buffer packets (20 x 60ms = 1.2s of audio)
     BURST_INTERVAL = 0.01  # 10ms between burst packets
     SUSTAIN_INTERVAL = 0.05  # 50ms sustain (vs 60ms real-time = 10ms margin)
 
@@ -228,33 +295,30 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
 
     for i, packet in enumerate(opus_packets):
         if state.tts_abort:
-            logger.info(f"[{state.session_id}] TTS aborted after {sent_count}/{len(opus_packets)} packets")
+            logger.info(f"[{state.session_id}] TTS aborted at {sent_count}/{len(opus_packets)}")
             break
 
-        # 检查连接是否仍然活跃
         if ws.closed:
-            logger.warning(f"[{state.session_id}] WS closed during TTS after {sent_count}/{len(opus_packets)} packets")
+            logger.warning(f"[{state.session_id}] WS closed at TTS packet {sent_count}/{len(opus_packets)}")
             break
 
-        try:
-            await ws.send(packet)
+        ok = await _ws_send_safe(ws, packet, state, f"pkt#{i}")
+        if ok:
             sent_count += 1
-            send_errors = 0  # 重置连续错误计数
-        except Exception as e:
+            send_errors = 0
+        else:
             send_errors += 1
-            logger.error(f"[{state.session_id}] TTS send error #{send_errors} at packet {i}/{len(opus_packets)}: {type(e).__name__}: {e}")
             if send_errors >= 3:
-                logger.error(f"[{state.session_id}] Too many consecutive send errors, aborting TTS")
+                logger.error(f"[{state.session_id}] 3 consecutive send errors at packet {i}, aborting TTS")
                 break
-            # 单次错误：短暂等待后继续尝试下一个包
             await asyncio.sleep(0.01)
             continue
 
-        # Log progress: first 3, then every 20
+        # Log progress
         if sent_count <= 3 or sent_count % 20 == 0:
-            logger.info(f"[{state.session_id}] TTS sent #{sent_count}/{len(opus_packets)} ({len(packet)} bytes)")
+            logger.info(f"[{state.session_id}] TTS sent #{sent_count}/{len(opus_packets)} ({len(packet)}B)")
 
-        # Drift-free pacing using absolute time targets
+        # Drift-free pacing
         if i < BURST_COUNT:
             target = t0 + (i + 1) * BURST_INTERVAL
         else:
@@ -263,17 +327,13 @@ async def process_audio(ws: WebSocketServerProtocol, state: ConnState):
         if sleep_time > 0:
             await asyncio.sleep(sleep_time)
 
+    elapsed = time.monotonic() - t0
     if not state.tts_abort:
-        try:
-            await ws.send(json.dumps({"type": "tts_end"}))
-        except Exception as e:
-            logger.error(f"[{state.session_id}] Failed to send tts_end: {e}")
-        elapsed = time.monotonic() - t0
-        logger.info(f"[{state.session_id}] TTS complete: {sent_count}/{len(opus_packets)} packets in {elapsed:.1f}s (errors: {send_errors})")
+        ok = await _ws_send_safe(ws, json.dumps({"type": "tts_end"}), state, "tts_end")
+        logger.info(f"[{state.session_id}] TTS complete: {sent_count}/{len(opus_packets)} in {elapsed:.1f}s "
+                     f"(errors={send_errors}, tts_end={'sent' if ok else 'FAILED'})")
     else:
-        logger.info(f"[{state.session_id}] TTS aborted, sent tts_end already via abort handler")
-
-    state.processing = False
+        logger.info(f"[{state.session_id}] TTS aborted after {sent_count}/{len(opus_packets)} in {elapsed:.1f}s")
 
 
 async def handle_client(ws: WebSocketServerProtocol, path: str):
@@ -286,13 +346,15 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
 
     if not device_id or not token:
         logger.warning(f"Missing credentials from {ws.remote_address}")
-        await ws.send(json.dumps({"type": "error", "message": "missing device_id/token"}))
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": "missing device_id/token"}),
+                            ConnState("unknown"))
         await ws.close(code=4401, reason="missing credentials")
         return
 
     if not registry.is_valid(device_id, token):
         logger.warning(f"Invalid token for device {device_id}")
-        await ws.send(json.dumps({"type": "error", "message": "invalid token"}))
+        await _ws_send_safe(ws, json.dumps({"type": "error", "message": "invalid token"}),
+                            ConnState("unknown"))
         await ws.close(code=4401, reason="invalid token")
         return
 
@@ -310,8 +372,16 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
     except Exception as e:
         logger.error(f"[{state.session_id}] Error handling device {device_id}: {e}", exc_info=True)
     finally:
-        # Clean abort on disconnect
+        # Signal abort to any running process_audio task
         state.tts_abort = True
+        # Wait briefly for background task to finish
+        if state._process_task and not state._process_task.done():
+            logger.info(f"[{state.session_id}] Waiting for process_audio to finish...")
+            try:
+                await asyncio.wait_for(state._process_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                state._process_task.cancel()
+                logger.warning(f"[{state.session_id}] Force-cancelled process_audio")
         reset_conversation(state.session_id)
         logger.info(f"[{state.session_id}] Session ended for device {device_id}")
 
@@ -327,9 +397,9 @@ async def start_websocket_server():
         # Disable server-side pings: device uses TCP keepalive instead
         ping_interval=None,
         ping_timeout=None,
-        # 增大写缓冲区，避免TTS burst发送时背压导致异常
+        # Increase write buffer to handle TTS burst sending
         write_limit=2**18,  # 256KB (default 64KB)
-        max_queue=64,       # 允许更多待发送消息排队
+        max_queue=64,       # Allow more incoming messages to buffer
     ):
         logger.info(f"WebSocket server listening on ws://{settings.ws_host}:{settings.ws_port}/ws")
         await asyncio.Future()  # Run forever
