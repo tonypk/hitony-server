@@ -287,9 +287,25 @@ async def _execute_with_hint(ws, session, intent: dict):
         logger.error(f"[{sid}] OpenClaw failed: {e}")
         result = "Sorry, I couldn't complete that task right now."
 
-    # --- Synthesize and send result audio (still in same TTS session) ---
+    # --- Synthesize result audio with silence keepalive (TTS API can take 3-5s) ---
+    tts_task = asyncio.create_task(synthesize_tts(result))
+
+    while not tts_task.done():
+        if session.tts_abort or ws.closed:
+            tts_task.cancel()
+            break
+        try:
+            await asyncio.wait_for(asyncio.shield(tts_task), timeout=2.0)
+        except asyncio.TimeoutError:
+            await ws_send_safe(ws, silence_blob, session, "silence")
+            logger.debug(f"[{sid}] Silence keepalive during TTS synth ({time.monotonic()-t0:.0f}s)")
+
+    if session.tts_abort or ws.closed:
+        await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
+        return
+
     try:
-        result_packets = await synthesize_tts(result)
+        result_packets = tts_task.result()
         logger.info(f"[{sid}] Result TTS: {len(result_packets)} packets")
     except Exception as e:
         logger.error(f"[{sid}] Result TTS failed: {e}")
