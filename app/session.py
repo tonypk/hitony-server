@@ -70,6 +70,7 @@ class Session:
         # Meeting recording state
         self.meeting_active: bool = False
         self.meeting_session_id: Optional[str] = None
+        self.meeting_db_id: Optional[int] = None
         self._meeting_audio_buffer: bytearray = bytearray()
 
     def touch(self):

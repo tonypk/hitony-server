@@ -24,7 +24,7 @@ def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
         )
     return _client
 
-def _pcm_to_wav(pcm_bytes: bytes) -> bytes:
+def pcm_to_wav(pcm_bytes: bytes) -> bytes:
     """Convert raw PCM16 mono 16kHz to WAV format in memory"""
     num_channels = settings.pcm_channels
     sample_rate = settings.pcm_sample_rate
@@ -80,7 +80,7 @@ _HALLUCINATION_SUBSTRINGS = [
 
 async def transcribe_pcm(pcm_bytes: bytes, session: Optional[Session] = None) -> str:
     """Transcribe PCM audio using OpenAI Whisper API"""
-    wav_bytes = _pcm_to_wav(pcm_bytes)
+    wav_bytes = pcm_to_wav(pcm_bytes)
     duration_s = len(pcm_bytes) / 2 / settings.pcm_sample_rate
     logger.info(f"ASR: sending {len(pcm_bytes)} bytes PCM ({duration_s:.1f}s, {len(wav_bytes)} bytes WAV) to Whisper")
 

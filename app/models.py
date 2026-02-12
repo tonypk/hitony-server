@@ -60,6 +60,25 @@ class UserSettings(Base):
     owner = relationship("User", back_populates="settings")
 
 
+class Meeting(Base):
+    __tablename__ = "meetings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    device_id = Column(String(64), nullable=False)
+    session_id = Column(String(8), unique=True, nullable=False)
+    title = Column(String(256), default="会议")
+    audio_path = Column(String(512), default="")
+    duration_s = Column(Integer, default=0)
+    transcript = Column(Text, default="")
+    status = Column(String(16), default="recording")  # recording / ended / transcribed
+    started_at = Column(DateTime, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    owner = relationship("User")
+
+
 class Reminder(Base):
     __tablename__ = "reminders"
 

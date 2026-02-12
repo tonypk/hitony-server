@@ -268,6 +268,26 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 session._process_task.cancel()
                 logger.warning(f"[{session.session_id}] Force-cancelled pipeline")
+        # Auto-save meeting recording if still active
+        if session.meeting_active and session._meeting_audio_buffer:
+            session.meeting_active = False
+            try:
+                from .tools.builtin.meeting import _save_meeting_audio, _update_meeting_record
+                audio_path = _save_meeting_audio(session.meeting_session_id, session._meeting_audio_buffer)
+                if session.meeting_db_id:
+                    from datetime import datetime
+                    duration_s = len(session._meeting_audio_buffer) / 2 / 16000
+                    await _update_meeting_record(
+                        session.meeting_db_id,
+                        status="ended",
+                        duration_s=int(duration_s),
+                        audio_path=audio_path,
+                        ended_at=datetime.utcnow(),
+                    )
+                logger.info(f"[{session.session_id}] Meeting auto-saved on disconnect: {session.meeting_session_id}")
+            except Exception as e:
+                logger.error(f"[{session.session_id}] Failed to auto-save meeting: {e}")
+
         reset_conversation(session.session_id)
         logger.info(f"[{session.session_id}] Session ended for device {device_id}")
 
