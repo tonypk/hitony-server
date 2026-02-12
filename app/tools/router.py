@@ -24,7 +24,8 @@ def _build_rules():
 
     rules = [
         # ── Music playback (with query) ─────────────────
-        (r"^(?:播放|放|来一首|我想听|放首|听一?(?:首|个)?)\s*(.+)",
+        # "帮我播放..." / "请播放..." prefix support
+        (r"^(?:帮我|请|能不能|可以)?\s*(?:播放|放|来一首|我想听|放首|听一?(?:首|个)?)\s+(.+)",
          "youtube.play",
          lambda m: {"query": m.group(1).strip()},
          "正在为你播放{query}"),
@@ -35,7 +36,7 @@ def _build_rules():
          "Playing {query}"),
 
         # ── Generic music (no specific query) ────────────
-        (r"^(?:放首歌|放个歌|放音乐|播放音乐|来首歌|听歌|play(?:\s+some)?\s+music)$",
+        (r"^(?:帮我|请)?\s*(?:放首歌|放个歌|放音乐|播放音乐|来首歌|听歌|播放|play(?:\s+some)?\s+music)$",
          "youtube.play",
          lambda m: {"query": "热门歌曲"},
          "正在播放音乐"),
@@ -50,6 +51,34 @@ def _build_rules():
         (r"^(?:停止|停止播放|停|别放了|别播了|stop)$",
          "player.stop", lambda m: {}, "已停止"),
 
+        # ── Timer ─────────────────────────────────────────
+        (r"^(?:倒计时|计时)\s*(\d+)\s*(?:分钟|分)$",
+         "timer.set",
+         lambda m: {"seconds": str(int(m.group(1)) * 60), "label": f"{m.group(1)}分钟倒计时"},
+         "{label}已开始"),
+
+        (r"^(?:倒计时|计时)\s*(\d+)\s*秒$",
+         "timer.set",
+         lambda m: {"seconds": m.group(1), "label": f"{m.group(1)}秒倒计时"},
+         "{label}已开始"),
+
+        (r"^(\d+)\s*(?:分钟|分)(?:后|之后)?(?:提醒我|叫我|告诉我)(.*)$",
+         "timer.set",
+         lambda m: {"seconds": str(int(m.group(1)) * 60),
+                     "label": m.group(2).strip() or f"{m.group(1)}分钟倒计时"},
+         "好的，{label}"),
+
+        # ── Weather ───────────────────────────────────────
+        (r"^(?:今天|明天|后天|.{2,4}的)?天气(?:怎么样|如何|预报)?$",
+         "weather.query",
+         lambda m: {"query": m.group(0)},
+         "正在查询天气"),
+
+        (r"^(?:what'?s the |how'?s the )?weather",
+         "weather.query",
+         lambda m: {"query": m.group(0)},
+         "Checking weather"),
+
         # ── Meeting ──────────────────────────────────────
         (r"^(?:开始(?:会议|录音|记录)|start\s+(?:meeting|recording))(?:\s+(.+))?$",
          "meeting.start",
@@ -61,6 +90,12 @@ def _build_rules():
 
         (r"^(?:转录|转写|会议(?:记录|内容)|transcribe)$",
          "meeting.transcribe", lambda m: {}, "正在转录"),
+
+        # ── Web search ────────────────────────────────────
+        (r"^(?:搜索|搜一下|查一下|帮我查|百度|谷歌|search)\s+(.+)",
+         "web.search",
+         lambda m: {"query": m.group(1).strip()},
+         "正在搜索{query}"),
     ]
 
     _RULES.clear()
@@ -75,6 +110,9 @@ def route(text: str) -> Optional[RouteMatch]:
         match = regex.match(text)
         if match:
             args = extractor(match)
+            # Filter out empty query values
+            if "query" in args and not args["query"]:
+                continue
             try:
                 hint = hint_template.format(**args) if args else hint_template
             except KeyError:

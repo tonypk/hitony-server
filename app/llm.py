@@ -38,6 +38,20 @@ Meeting rules:
 - End recording → "meeting.end"
 - Transcribe → "meeting.transcribe"
 
+Weather rules:
+- Weather queries → use "weather.query"
+- Triggers: 天气/weather
+
+Timer rules:
+- Countdown timer → use "timer.set" with seconds (as string) and optional label
+- Convert minutes to seconds (e.g. 5分钟 → seconds="300")
+- Triggers: 倒计时/计时/X分钟后提醒我/X分钟后叫我
+
+Search rules:
+- Web search → use "web.search" with query
+- Use for questions needing real-time or factual data you don't know
+- Triggers: 搜索/搜一下/查一下/search
+
 Examples:
 - "播放周杰伦的歌" → {{"tool": "youtube.play", "args": {{"query": "周杰伦 热门歌曲"}}, "reply_hint": "正在播放周杰伦的歌"}}
 - "放首歌" → {{"tool": "youtube.play", "args": {{"query": "热门歌曲"}}, "reply_hint": "正在播放音乐"}}
@@ -46,7 +60,10 @@ Examples:
 - "提醒我明天下午3点开会" → {{"tool": "reminder.set", "args": {{"datetime_iso": "2026-02-13T15:00:00", "message": "开会", "response": "好的，已设置明天下午3点提醒你开会"}}, "reply_hint": "设置提醒"}}
 - "开始会议" → {{"tool": "meeting.start", "args": {{}}, "reply_hint": "开始录音"}}
 - "结束会议" → {{"tool": "meeting.end", "args": {{}}, "reply_hint": "录音结束"}}
-- "今天天气怎么样" → {{"tool": "chat", "args": {{"response": "抱歉，我目前没有实时天气数据。"}}}}
+- "今天天气怎么样" → {{"tool": "weather.query", "args": {{"query": "今天天气"}}, "reply_hint": "正在查询天气"}}
+- "倒计时5分钟" → {{"tool": "timer.set", "args": {{"seconds": "300", "label": "5分钟倒计时"}}, "reply_hint": "5分钟倒计时已开始"}}
+- "3分钟后叫我" → {{"tool": "timer.set", "args": {{"seconds": "180", "label": "3分钟倒计时"}}, "reply_hint": "好的"}}
+- "搜一下最新的iPhone价格" → {{"tool": "web.search", "args": {{"query": "最新iPhone价格"}}, "reply_hint": "正在搜索"}}
 - "你好" → {{"tool": "chat", "args": {{"response": "你好！有什么可以帮你的吗？"}}}}
 
 IMPORTANT: Always respond with valid JSON only. No markdown, no code blocks. Respond in the same language as the user."""

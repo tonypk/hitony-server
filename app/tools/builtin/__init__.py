@@ -3,3 +3,6 @@ from . import youtube
 from . import player
 from . import reminder
 from . import meeting
+from . import weather
+from . import timer
+from . import search

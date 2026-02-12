@@ -19,7 +19,7 @@ from .session import Session
 from .asr import transcribe_pcm
 from .tts import synthesize_tts
 from .llm import plan_intent
-from .tools import route_intent, execute_tool
+from .tools import route_intent, execute_tool, get_tool
 
 logger = logging.getLogger(__name__)
 
@@ -206,10 +206,21 @@ async def _process_and_speak(ws, session, text: str):
     if session.tts_abort or ws.closed:
         return
 
-    # 4. Handle "chat" (direct response, no tool execution)
+    # 4. Validate tool exists (LLM might hallucinate a tool name)
+    if tool_name != "chat" and not get_tool(tool_name):
+        logger.warning(f"[{sid}] Unknown tool '{tool_name}', falling back to chat")
+        # Re-run through LLM as chat
+        tool_name = "chat"
+        args = {"response": args.get("reply_hint", args.get("response", "抱歉，我不太明白你的意思。"))}
+
+    # Track whether music was paused for this interaction (for auto-resume)
+    music_was_paused = session.music_playing and session.music_paused
+
+    # 5. Handle "chat" (direct response, no tool execution)
     if tool_name == "chat":
         reply = args.get("response", "")
         if not reply:
+            _auto_resume_music(session, music_was_paused)
             return
         try:
             opus_packets = await synthesize_tts(reply, session=session)
@@ -217,13 +228,16 @@ async def _process_and_speak(ws, session, text: str):
         except Exception as e:
             logger.error(f"[{sid}] TTS failed: {e}")
             await ws_send_safe(ws, json.dumps({"type": "error", "message": f"TTS failed: {e}"}), session)
+            _auto_resume_music(session, music_was_paused)
             return
         if session.tts_abort or ws.closed:
+            _auto_resume_music(session, music_was_paused)
             return
         await _send_tts_round(ws, session, opus_packets, reply)
+        _auto_resume_music(session, music_was_paused)
         return
 
-    # 5. Execute tool
+    # 6. Execute tool
     # For tools with a hint, speak it first in a TTS session
     tts_session_open = False
     if reply_hint:
@@ -301,6 +315,18 @@ async def _process_and_speak(ws, session, text: str):
     else:  # "silent" or unknown
         if tts_session_open:
             await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
+
+    # Auto-resume music if it was paused for this interaction and tool wasn't player-related
+    if not tool_name.startswith("player.") and tool_name != "youtube.play":
+        _auto_resume_music(session, music_was_paused)
+
+
+def _auto_resume_music(session: Session, was_paused: bool):
+    """Resume music playback if it was paused for a voice interaction."""
+    if was_paused and session.music_playing and session.music_paused:
+        session._music_pause_event.set()
+        session.music_paused = False
+        logger.info(f"[{session.session_id}] Music auto-resumed after interaction")
 
 
 async def _stream_music(ws, session, title: str, generator):
