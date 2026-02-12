@@ -49,6 +49,11 @@ class UserSettings(Base):
     openai_tts_model = Column(String(64), default="")
     openai_tts_voice = Column(String(32), default="")
 
+    # Tool API keys (encrypted at rest)
+    weather_api_key_enc = Column(Text, default="")
+    weather_city = Column(String(64), default="")
+    tavily_api_key_enc = Column(Text, default="")
+
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     owner = relationship("User", back_populates="settings")
