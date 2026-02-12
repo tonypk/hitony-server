@@ -96,6 +96,12 @@ def _build_rules():
          "web.search",
          lambda m: {"query": m.group(1).strip()},
          "正在搜索{query}"),
+
+        # ── Voice note → Notion ──────────────────────────
+        (r"^(?:记一下|记录一下|笔记|帮我记|备忘|note)\s*[,，:：]?\s*(.+)",
+         "note.save",
+         lambda m: {"content": m.group(1).strip()},
+         "正在记录"),
     ]
 
     _RULES.clear()

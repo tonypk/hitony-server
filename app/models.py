@@ -55,6 +55,10 @@ class UserSettings(Base):
     tavily_api_key_enc = Column(Text, default="")
     youtube_api_key_enc = Column(Text, default="")
 
+    # Notion integration
+    notion_token_enc = Column(Text, default="")
+    notion_database_id = Column(String(64), default="")
+
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     owner = relationship("User", back_populates="settings")

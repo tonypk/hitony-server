@@ -206,6 +206,8 @@ async def _load_user_config(device_id: str, token: str) -> UserConfig | None:
                 weather_city=us.weather_city or "",
                 tavily_api_key=decrypt_secret(us.tavily_api_key_enc) if us.tavily_api_key_enc else "",
                 youtube_api_key=decrypt_secret(us.youtube_api_key_enc) if us.youtube_api_key_enc else "",
+                notion_token=decrypt_secret(us.notion_token_enc) if us.notion_token_enc else "",
+                notion_database_id=us.notion_database_id or "",
             )
     except Exception as e:
         logger.error(f"DB auth error for {device_id}: {e}")

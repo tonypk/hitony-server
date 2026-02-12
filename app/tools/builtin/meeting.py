@@ -200,7 +200,23 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
         except Exception as e:
             logger.error(f"Failed to save transcript to DB: {e}")
 
+    # Auto-push to Notion if configured
+    notion_pushed = False
+    if session and session.config.notion_token and session.config.notion_database_id:
+        try:
+            from .notion import push_meeting_to_notion
+            notion_pushed = await push_meeting_to_notion(
+                token=session.config.notion_token,
+                database_id=session.config.notion_database_id,
+                title=session.meeting_session_id or "会议",
+                transcript=transcript,
+                duration_s=int(len(audio_buffer) / 2 / 16000),
+            )
+        except Exception as e:
+            logger.error(f"Failed to push meeting to Notion: {e}")
+
     # Speak a summary (first 200 chars), full transcript in data
     summary = transcript[:200] + ("..." if len(transcript) > 200 else "")
+    notion_msg = "，已同步到Notion" if notion_pushed else ""
     logger.info(f"Meeting transcript ({len(transcript)} chars): {transcript[:100]}...")
-    return ToolResult(type="tts", text=f"会议内容：{summary}", data={"transcript": transcript})
+    return ToolResult(type="tts", text=f"会议内容：{summary}{notion_msg}", data={"transcript": transcript})

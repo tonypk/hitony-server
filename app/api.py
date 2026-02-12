@@ -65,6 +65,8 @@ class SettingsUpdate(BaseModel):
     weather_city: Optional[str] = None
     tavily_api_key: Optional[str] = None
     youtube_api_key: Optional[str] = None
+    notion_token: Optional[str] = None
+    notion_database_id: Optional[str] = None
 
 class SettingsOut(BaseModel):
     openai_api_key_set: bool
@@ -78,6 +80,8 @@ class SettingsOut(BaseModel):
     weather_city: str
     tavily_api_key_set: bool
     youtube_api_key_set: bool
+    notion_token_set: bool
+    notion_database_id: str
 
 
 # ── Auth ──────────────────────────────────────────────────────
@@ -201,6 +205,8 @@ async def get_settings(
         weather_city=s.weather_city or "",
         tavily_api_key_set=bool(s.tavily_api_key_enc),
         youtube_api_key_set=bool(s.youtube_api_key_enc),
+        notion_token_set=bool(s.notion_token_enc),
+        notion_database_id=s.notion_database_id or "",
     )
 
 
@@ -239,9 +245,32 @@ async def update_settings(
         s.tavily_api_key_enc = encrypt_secret(req.tavily_api_key) if req.tavily_api_key else ""
     if req.youtube_api_key is not None:
         s.youtube_api_key_enc = encrypt_secret(req.youtube_api_key) if req.youtube_api_key else ""
+    if req.notion_token is not None:
+        s.notion_token_enc = encrypt_secret(req.notion_token) if req.notion_token else ""
+    if req.notion_database_id is not None:
+        s.notion_database_id = req.notion_database_id
     await db.commit()
     logger.info(f"Settings updated for user {user.email}")
     return {"ok": True}
+
+
+class NotionTestRequest(BaseModel):
+    token: str
+    database_id: str
+
+
+@router.post("/settings/notion-test")
+async def test_notion(
+    req: NotionTestRequest,
+    user: User = Depends(get_current_user),
+):
+    """Test Notion connection with provided token and database ID."""
+    try:
+        from .tools.builtin.notion import test_connection
+        result = await test_connection(req.token, req.database_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Notion connection failed: {e}")
 
 
 # ── Reminders ────────────────────────────────────────────────

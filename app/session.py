@@ -27,6 +27,9 @@ class UserConfig:
     tavily_api_key: str = ""
     youtube_api_key: str = ""
 
+    notion_token: str = ""
+    notion_database_id: str = ""
+
     def get(self, field_name: str, fallback: str) -> str:
         """Return user value if set, otherwise fallback to global default."""
         val = getattr(self, field_name, "")

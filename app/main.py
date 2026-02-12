@@ -324,6 +324,18 @@ _ADMIN_HTML = """<!doctype html>
       <p class="text-sm" id="s-youtube-key-status"></p>
       <p class="text-sm" style="color:#666">Used for music search. Free quota: ~100 searches/day. Without key, falls back to yt-dlp search.</p>
     </div>
+    <div class="card">
+      <h3>Notion Integration</h3>
+      <p class="text-sm" style="margin-bottom:8px">Connect to Notion for voice notes and meeting transcripts. <a href="https://www.notion.so/profile/integrations" target="_blank">Create integration</a> &rarr; copy token.</p>
+      <label>Integration Token</label>
+      <input id="s-notion-token" type="password" placeholder="ntn_..."/>
+      <p class="text-sm" id="s-notion-token-status"></p>
+      <label>Database ID <a href="https://developers.notion.com/docs/working-with-databases#adding-pages-to-a-database" target="_blank" style="font-size:0.8em">(how to find)</a></label>
+      <input id="s-notion-dbid" placeholder="abc123def456..."/>
+      <p class="text-sm" style="color:#666">Open your Notion database &rarr; copy the ID from the URL (32 hex chars after workspace name).</p>
+      <button class="btn btn-sm mt" style="background:#000;color:#fff" onclick="testNotion()">Test Connection</button>
+      <span id="notion-test-result" class="text-sm" style="margin-left:8px"></span>
+    </div>
     <button class="btn btn-primary mt" style="width:100%" onclick="saveSettings()">Save Settings</button>
   </div>
 </div>
@@ -547,6 +559,10 @@ async function loadSettings() {
     document.getElementById('s-tavily-key-status').textContent = s.tavily_api_key_set ? 'Tavily API key is set' : 'No Tavily API key configured';
     document.getElementById('s-youtube-key').value = '';
     document.getElementById('s-youtube-key-status').textContent = s.youtube_api_key_set ? 'YouTube API key is set' : 'No YouTube API key (using yt-dlp search)';
+    // Notion
+    document.getElementById('s-notion-token').value = '';
+    document.getElementById('s-notion-token-status').textContent = s.notion_token_set ? 'Notion token is set' : 'No Notion token configured';
+    document.getElementById('s-notion-dbid').value = s.notion_database_id || '';
   } catch(e) {}
 }
 
@@ -575,11 +591,32 @@ async function saveSettings() {
   if (tavilyKey) body.tavily_api_key = tavilyKey;
   const youtubeKey = document.getElementById('s-youtube-key').value;
   if (youtubeKey) body.youtube_api_key = youtubeKey;
+  // Notion
+  const notionToken = document.getElementById('s-notion-token').value;
+  if (notionToken) body.notion_token = notionToken;
+  body.notion_database_id = document.getElementById('s-notion-dbid').value.trim();
   try {
     await api('/api/settings', 'PUT', body);
     showMsg('set-msg', 'Settings saved', false);
     await loadSettings();
   } catch(e) { showMsg('set-msg', e.message, true); }
+}
+
+// ── Notion test ──
+async function testNotion() {
+  const token = document.getElementById('s-notion-token').value.trim();
+  const dbid = document.getElementById('s-notion-dbid').value.trim();
+  const el = document.getElementById('notion-test-result');
+  if (!token || !dbid) { el.textContent = 'Enter token and database ID first'; el.style.color = '#dc2626'; return; }
+  el.textContent = 'Testing...'; el.style.color = '#666';
+  try {
+    const res = await api('/api/settings/notion-test', 'POST', {token, database_id: dbid});
+    el.textContent = 'Connected! Database: ' + (res.database_title || dbid.slice(0,8) + '...');
+    el.style.color = '#16a34a';
+  } catch(e) {
+    el.textContent = 'Failed: ' + e.message;
+    el.style.color = '#dc2626';
+  }
 }
 
 // ── Tabs ──
