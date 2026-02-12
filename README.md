@@ -1,6 +1,6 @@
-# EchoEar Server
+# HiTony Server
 
-WebSocket + HTTP admin server for EchoEar devices. Uses OpenAI for ASR (Whisper), LLM (GPT), and TTS.
+WebSocket + HTTP admin server for HiTony devices. Uses OpenAI for ASR (Whisper), LLM (GPT), and TTS.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ python run_server.py
 ```bash
 curl -X POST http://localhost:8000/register \
   -H 'Content-Type: application/json' \
-  -d '{"device_id":"echoear-001","token":"devtoken"}'
+  -d '{"device_id":"hitony-001","token":"devtoken"}'
 ```
 
 ## WebSocket protocol (xiaozhi-compatible)
@@ -59,7 +59,7 @@ curl -X POST http://localhost:8000/register \
 ## systemd deployment
 
 ```bash
-sudo cp echoear-server-ws.service /etc/systemd/system/echoear-server.service
+sudo cp hitony-server-ws.service /etc/systemd/system/hitony-server.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now echoear-server
+sudo systemctl enable --now hitony-server
 ```

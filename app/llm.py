@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # Per-session conversation history
 _conversations: Dict[str, List[dict]] = {}
 
-INTENT_PROMPT = """You are EchoEar, a smart voice assistant. Analyze the user's request and respond in JSON.
+INTENT_PROMPT = """You are HiTony, a smart voice assistant. Analyze the user's request and respond in JSON.
 Today's date/time: {current_datetime}
 
 Modes:
@@ -53,7 +53,7 @@ Examples:
 IMPORTANT: Always respond with valid JSON only. No markdown, no code blocks."""
 
 # Fallback prompt when OpenClaw is not configured (simple chat mode)
-CHAT_PROMPT = "You are EchoEar, a helpful voice assistant. Keep responses concise and conversational."
+CHAT_PROMPT = "You are HiTony, a helpful voice assistant. Keep responses concise and conversational."
 
 
 def reset_conversation(session_id: str):

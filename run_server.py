@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EchoEar Server - Dual server launcher
+HiTony Server - Dual server launcher
 Runs both WebSocket server (websockets lib) and HTTP server (FastAPI) concurrently
 """
 import os
@@ -41,7 +41,7 @@ async def run_http_server():
 
 async def main():
     """Run both servers concurrently"""
-    logger.info("Starting EchoEar servers...")
+    logger.info("Starting HiTony servers...")
     logger.info(f"Python {sys.version}, encoding={sys.getdefaultencoding()}")
     logger.info(f"HTTP admin server will run on http://0.0.0.0:8000")
     logger.info(f"WebSocket server will run on ws://{settings.ws_host}:{settings.ws_port}")

@@ -27,8 +27,8 @@ def _sanitize_ascii(val: str) -> str:
 
 class Settings(BaseModel):
     # Network
-    ws_host: str = os.getenv("ECHOEAR_WS_HOST", "0.0.0.0")
-    ws_port: int = int(os.getenv("ECHOEAR_WS_PORT", "9001"))
+    ws_host: str = os.getenv("HITONY_WS_HOST", "0.0.0.0")
+    ws_port: int = int(os.getenv("HITONY_WS_PORT", "9001"))
 
     # Device auth
     device_token_header: str = "x-device-token"

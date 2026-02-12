@@ -10,7 +10,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "echoear.db"
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "hitony.db"
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
 engine = create_async_engine(DATABASE_URL, echo=False)

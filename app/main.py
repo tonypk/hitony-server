@@ -1,5 +1,5 @@
 """
-EchoEar Server - FastAPI HTTP endpoints + admin dashboard.
+HiTony Server - FastAPI HTTP endpoints + admin dashboard.
 WebSocket server runs separately via ws_server.py (launched by run_server.py).
 """
 import json
@@ -80,7 +80,7 @@ _ADMIN_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>EchoEar Admin</title>
+  <title>HiTony Admin</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -140,7 +140,7 @@ _ADMIN_HTML = """<!doctype html>
 
 <!-- AUTH PAGE -->
 <div id="auth-page" class="container">
-  <h1>EchoEar</h1>
+  <h1>HiTony</h1>
   <p class="subtitle">Voice Assistant Admin</p>
   <div class="card">
     <h3 id="auth-title">Login</h3>
@@ -159,7 +159,7 @@ _ADMIN_HTML = """<!doctype html>
 
 <!-- MAIN APP -->
 <div id="app-page" class="container hidden">
-  <h1>EchoEar</h1>
+  <h1>HiTony</h1>
   <p class="subtitle" id="user-email"></p>
 
   <div class="tabs">
@@ -174,11 +174,11 @@ _ADMIN_HTML = """<!doctype html>
     <div class="card">
       <h3>Add Device</h3>
       <div class="row2">
-        <div><label>Device ID</label><input id="d-id" placeholder="echoear-001"/></div>
+        <div><label>Device ID</label><input id="d-id" placeholder="hitony-001"/></div>
         <div><label>Token</label><input id="d-token" placeholder="devtoken"/></div>
       </div>
       <label>Name (optional)</label>
-      <input id="d-name" placeholder="My EchoEar"/>
+      <input id="d-name" placeholder="My HiTony"/>
       <button class="btn btn-primary mt" onclick="addDevice()">Add Device</button>
     </div>
     <div class="card">
@@ -201,7 +201,7 @@ _ADMIN_HTML = """<!doctype html>
         <thead><tr><th>Time</th><th>Message</th><th>Status</th><th></th></tr></thead>
         <tbody id="rem-tbody"></tbody>
       </table>
-      <p id="rem-empty" class="text-sm mt text-center hidden">No reminders yet. Say "remind me..." to your EchoEar device!</p>
+      <p id="rem-empty" class="text-sm mt text-center hidden">No reminders yet. Say "remind me..." to your HiTony device!</p>
     </div>
   </div>
 
@@ -239,7 +239,7 @@ _ADMIN_HTML = """<!doctype html>
 </div>
 
 <script>
-let TOKEN = localStorage.getItem('echoear_token');
+let TOKEN = localStorage.getItem('hitony_token');
 let IS_REGISTER = false;
 
 // ── Auth ──
@@ -263,16 +263,16 @@ async function doAuth() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Auth failed');
     TOKEN = data.access_token;
-    localStorage.setItem('echoear_token', TOKEN);
-    localStorage.setItem('echoear_email', data.email);
+    localStorage.setItem('hitony_token', TOKEN);
+    localStorage.setItem('hitony_email', data.email);
     enterApp();
   } catch(e) { showMsg('auth-msg', e.message, true); }
 }
 
 function logout() {
   TOKEN = null;
-  localStorage.removeItem('echoear_token');
-  localStorage.removeItem('echoear_email');
+  localStorage.removeItem('hitony_token');
+  localStorage.removeItem('hitony_email');
   document.getElementById('auth-page').classList.remove('hidden');
   document.getElementById('app-page').classList.add('hidden');
 }
@@ -280,7 +280,7 @@ function logout() {
 function enterApp() {
   document.getElementById('auth-page').classList.add('hidden');
   document.getElementById('app-page').classList.remove('hidden');
-  document.getElementById('user-email').textContent = localStorage.getItem('echoear_email') || '';
+  document.getElementById('user-email').textContent = localStorage.getItem('hitony_email') || '';
   loadDevices();
   loadReminders();
   loadSettings();

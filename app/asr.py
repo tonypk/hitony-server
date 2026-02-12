@@ -85,7 +85,9 @@ async def transcribe_pcm(pcm_bytes: bytes, session: Optional[Session] = None) ->
         model=asr_model,
         file=wav_file,
         temperature=0,
-        prompt="EchoEar voice assistant conversation.",
+        # Optimized prompt for fast speech and mixed languages
+        # 提示词优化：明确快速说话场景，提高识别准确度
+        prompt="HiTony语音助手对话。用户可能快速说话，使用中文、英文或混合语言。Natural conversation, fast speech, Chinese/English mixed.",
     )
 
     text = transcript.text.strip()

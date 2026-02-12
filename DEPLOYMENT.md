@@ -1,4 +1,4 @@
-# EchoEar WebSocket Server Deployment
+# HiTony WebSocket Server Deployment
 
 ## Changes in this version
 
@@ -15,7 +15,7 @@ Run these commands on the GCE VM:
 
 ```bash
 # Navigate to server directory
-cd ~/echoear-server
+cd ~/hitony-server
 
 # Pull latest changes
 git pull
@@ -24,23 +24,23 @@ git pull
 chmod +x run_server.py
 
 # Stop old service
-sudo systemctl stop echoear-server
+sudo systemctl stop hitony-server
 
 # Copy new service file
-sudo cp echoear-server-ws.service /etc/systemd/system/echoear-server.service
+sudo cp hitony-server-ws.service /etc/systemd/system/hitony-server.service
 
 # Reload systemd
 sudo systemctl daemon-reload
 
 # Enable and start new service
-sudo systemctl enable echoear-server
-sudo systemctl start echoear-server
+sudo systemctl enable hitony-server
+sudo systemctl start hitony-server
 
 # Check status
-sudo systemctl status echoear-server
+sudo systemctl status hitony-server
 
 # View logs
-sudo journalctl -u echoear-server -f
+sudo journalctl -u hitony-server -f
 ```
 
 ## Verify deployment
@@ -59,7 +59,7 @@ sudo journalctl -u echoear-server -f
 ## Rollback if needed
 
 ```bash
-sudo systemctl stop echoear-server
+sudo systemctl stop hitony-server
 git checkout HEAD~1
-sudo systemctl start echoear-server
+sudo systemctl start hitony-server
 ```

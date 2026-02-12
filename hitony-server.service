@@ -1,0 +1,16 @@
+[Unit]
+Description=HiTony WebSocket Server (websockets library)
+After=network.target
+
+[Service]
+Type=simple
+User=tonypk25
+WorkingDirectory=/home/tonypk25/hitony-server1
+ExecStart=/home/tonypk25/hitony-server1/.venv/bin/python3 run_server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
