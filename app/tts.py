@@ -83,7 +83,6 @@ async def synthesize_tts(text: str, session: Optional[Session] = None) -> list:
     logger.info(f"TTS: received {len(pcm_24k)} bytes PCM (24kHz)")
 
     # Run CPU-bound resample + Opus encode in thread pool to avoid blocking event loop.
-    # Blocking the event loop prevents silence keepalive during OpenClaw execution.
     loop = asyncio.get_event_loop()
     opus_packets = await loop.run_in_executor(None, _resample_and_encode, pcm_24k)
 

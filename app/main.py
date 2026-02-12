@@ -254,16 +254,6 @@ _ADMIN_HTML = """<!doctype html>
         <p class="text-sm" style="margin-top:4px;color:#16a34a">No API key required for Edge TTS</p>
       </div>
     </div>
-    <div class="card">
-      <h3>OpenClaw Agent</h3>
-      <label>URL</label>
-      <input id="s-claw-url" placeholder="https://your-openclaw-instance/v1"/>
-      <label>Token</label>
-      <input id="s-claw-token" type="password" placeholder="token"/>
-      <p class="text-sm" id="s-claw-status"></p>
-      <label>Model</label>
-      <input id="s-claw-model" placeholder="claude"/>
-    </div>
     <button class="btn btn-primary mt" style="width:100%" onclick="saveSettings()">Save Settings</button>
   </div>
 </div>
@@ -442,10 +432,6 @@ async function loadSettings() {
       document.getElementById('s-tts').value = s.openai_tts_model;
       document.getElementById('s-voice').value = s.openai_tts_voice;
     }
-    document.getElementById('s-claw-url').value = s.openclaw_url;
-    document.getElementById('s-claw-token').value = '';
-    document.getElementById('s-claw-status').textContent = s.openclaw_token_set ? 'Token is set' : 'No token configured';
-    document.getElementById('s-claw-model').value = s.openclaw_model;
   } catch(e) {}
 }
 
@@ -466,10 +452,6 @@ async function saveSettings() {
     body.openai_tts_model = document.getElementById('s-tts').value.trim();
     body.openai_tts_voice = document.getElementById('s-voice').value.trim();
   }
-  body.openclaw_url = document.getElementById('s-claw-url').value.trim();
-  const clawToken = document.getElementById('s-claw-token').value;
-  if (clawToken) body.openclaw_token = clawToken;
-  body.openclaw_model = document.getElementById('s-claw-model').value.trim();
   try {
     await api('/api/settings', 'PUT', body);
     showMsg('set-msg', 'Settings saved', false);

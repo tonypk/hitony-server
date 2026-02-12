@@ -202,9 +202,6 @@ async def _load_user_config(device_id: str, token: str) -> UserConfig | None:
                 tts_provider=us.tts_provider or "",
                 openai_tts_model=us.openai_tts_model or "",
                 openai_tts_voice=us.openai_tts_voice or "",
-                openclaw_url=us.openclaw_url or "",
-                openclaw_token=decrypt_secret(us.openclaw_token_enc) if us.openclaw_token_enc else "",
-                openclaw_model=us.openclaw_model or "",
             )
     except Exception as e:
         logger.error(f"DB auth error for {device_id}: {e}")

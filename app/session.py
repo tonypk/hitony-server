@@ -22,10 +22,6 @@ class UserConfig:
     openai_tts_model: str = ""
     openai_tts_voice: str = ""
 
-    openclaw_url: str = ""
-    openclaw_token: str = ""
-    openclaw_model: str = ""
-
     def get(self, field_name: str, fallback: str) -> str:
         """Return user value if set, otherwise fallback to global default."""
         val = getattr(self, field_name, "")
@@ -62,6 +58,14 @@ class Session:
 
         # Per-user config (populated during WS auth)
         self.config: UserConfig = UserConfig()
+
+        # Tool system: pending follow-up for ask_user flow
+        self._pending_tool_call: Optional[dict] = None
+
+        # Meeting recording state
+        self.meeting_active: bool = False
+        self.meeting_session_id: Optional[str] = None
+        self._meeting_audio_buffer: bytearray = bytearray()
 
     def touch(self):
         """Update last activity timestamp."""

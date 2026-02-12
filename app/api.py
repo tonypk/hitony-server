@@ -58,9 +58,6 @@ class SettingsUpdate(BaseModel):
     tts_provider: Optional[str] = None
     openai_tts_model: Optional[str] = None
     openai_tts_voice: Optional[str] = None
-    openclaw_url: Optional[str] = None
-    openclaw_token: Optional[str] = None
-    openclaw_model: Optional[str] = None
 
 class SettingsOut(BaseModel):
     openai_api_key_set: bool
@@ -70,9 +67,6 @@ class SettingsOut(BaseModel):
     tts_provider: str
     openai_tts_model: str
     openai_tts_voice: str
-    openclaw_url: str
-    openclaw_token_set: bool
-    openclaw_model: str
 
 
 # ── Auth ──────────────────────────────────────────────────────
@@ -192,9 +186,6 @@ async def get_settings(
         tts_provider=s.tts_provider or "",
         openai_tts_model=s.openai_tts_model,
         openai_tts_voice=s.openai_tts_voice,
-        openclaw_url=s.openclaw_url,
-        openclaw_token_set=bool(s.openclaw_token_enc),
-        openclaw_model=s.openclaw_model,
     )
 
 
@@ -225,13 +216,6 @@ async def update_settings(
         s.openai_tts_model = req.openai_tts_model
     if req.openai_tts_voice is not None:
         s.openai_tts_voice = req.openai_tts_voice
-    if req.openclaw_url is not None:
-        s.openclaw_url = req.openclaw_url
-    if req.openclaw_token is not None:
-        s.openclaw_token_enc = encrypt_secret(req.openclaw_token) if req.openclaw_token else ""
-    if req.openclaw_model is not None:
-        s.openclaw_model = req.openclaw_model
-
     await db.commit()
     logger.info(f"Settings updated for user {user.email}")
     return {"ok": True}

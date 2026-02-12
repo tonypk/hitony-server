@@ -49,11 +49,6 @@ class UserSettings(Base):
     openai_tts_model = Column(String(64), default="")
     openai_tts_voice = Column(String(32), default="")
 
-    # OpenClaw settings (token encrypted at rest via Fernet)
-    openclaw_url = Column(String(512), default="")
-    openclaw_token_enc = Column(Text, default="")
-    openclaw_model = Column(String(64), default="")
-
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     owner = relationship("User", back_populates="settings")

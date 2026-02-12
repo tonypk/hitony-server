@@ -47,12 +47,6 @@ class Settings(BaseModel):
     # Music
     music_max_duration_s: int = int(os.getenv("MUSIC_MAX_DURATION", "600"))
 
-    # OpenClaw Execution (agent that performs real-world tasks)
-    openclaw_base_url: str = _sanitize_ascii(os.getenv("OPENCLAW_URL", ""))
-    openclaw_token: str = _sanitize_ascii(os.getenv("OPENCLAW_TOKEN", ""))
-    openclaw_model: str = _sanitize_ascii(os.getenv("OPENCLAW_MODEL", "claude"))
-    openclaw_timeout: int = int(os.getenv("OPENCLAW_TIMEOUT", "30"))
-
     # Auth / DB
     secret_key: str = os.getenv("SECRET_KEY", "change-me-in-production-please")
 
@@ -65,7 +59,5 @@ settings = Settings()
 
 # Log config for debugging
 _oai_key = '***' + settings.openai_api_key[-4:] if len(settings.openai_api_key) > 4 else 'EMPTY'
-_claw_key = '***' + settings.openclaw_token[-4:] if len(settings.openclaw_token) > 4 else 'EMPTY'
 logger.info(f"Config: ASR/TTS → {settings.openai_base_url} (key={_oai_key})")
 logger.info(f"Config: Intent → {settings.openai_base_url}, model={settings.intent_model}")
-logger.info(f"Config: OpenClaw → {settings.openclaw_base_url or 'DISABLED'}, model={settings.openclaw_model} (key={_claw_key})")
