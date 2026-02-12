@@ -25,6 +25,7 @@ async def _youtube_api_search(query: str, api_key: str) -> Tuple[str, str, Optio
         "q": query,
         "type": "video",
         "videoCategoryId": "10",  # Music category
+        "videoDuration": "medium",  # 4-20 min, filters out compilations
         "maxResults": 1,
         "key": api_key,
     }
@@ -46,12 +47,21 @@ async def _youtube_api_search(query: str, api_key: str) -> Tuple[str, str, Optio
 
 
 async def _ytdlp_search(query: str) -> Tuple[str, str, int]:
-    """Search via yt-dlp ytsearch. Returns (title, video_url, duration)."""
-    search_query = query if query.startswith("http") else f"ytsearch:{query}"
+    """Search via yt-dlp ytsearch. Returns (title, video_url, duration).
+
+    Searches top 5 results and picks the first one under max duration.
+    """
+    if query.startswith("http"):
+        search_query = query
+        max_results = 1
+    else:
+        max_results = 5
+        search_query = f"ytsearch{max_results}:{query}"
+
     logger.info(f"Music: yt-dlp search for '{search_query}'")
 
     meta_proc = await asyncio.create_subprocess_exec(
-        "yt-dlp", "--dump-json", "--no-download", search_query,
+        "yt-dlp", "--dump-json", "--no-download", "--flat-playlist", search_query,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -61,10 +71,37 @@ async def _ytdlp_search(query: str) -> Tuple[str, str, int]:
         err = meta_stderr.decode(errors="replace")[:200]
         raise RuntimeError(f"yt-dlp metadata failed: {err}")
 
-    info = json.loads(meta_stdout)
+    # Parse results (one JSON object per line for multi-result search)
+    candidates = []
+    for line in meta_stdout.decode(errors="replace").strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            info = json.loads(line)
+            candidates.append(info)
+        except json.JSONDecodeError:
+            continue
+
+    if not candidates:
+        raise RuntimeError(f"yt-dlp: no results for '{query}'")
+
+    # Pick first result under max duration
+    max_dur = settings.music_max_duration_s
+    for info in candidates:
+        duration = info.get("duration", 0) or 0
+        if duration <= max_dur:
+            title = info.get("title", "Unknown")
+            url = info.get("webpage_url") or info.get("url", search_query)
+            logger.info(f"Music: yt-dlp picked '{title}' ({duration}s) from {len(candidates)} results")
+            return title, url, duration
+
+    # All results too long — return first one anyway (will be caught by caller)
+    info = candidates[0]
     title = info.get("title", "Unknown")
-    url = info.get("webpage_url", search_query)
-    duration = info.get("duration", 0)
+    url = info.get("webpage_url") or info.get("url", search_query)
+    duration = info.get("duration", 0) or 0
+    logger.warning(f"Music: all {len(candidates)} results exceed {max_dur}s, using first: '{title}' ({duration}s)")
     return title, url, duration
 
 
