@@ -199,6 +199,7 @@ async def _load_user_config(device_id: str, token: str) -> UserConfig | None:
                 openai_base_url=us.openai_base_url or "",
                 openai_chat_model=us.openai_chat_model or "",
                 openai_asr_model=us.openai_asr_model or "",
+                tts_provider=us.tts_provider or "",
                 openai_tts_model=us.openai_tts_model or "",
                 openai_tts_voice=us.openai_tts_voice or "",
                 openclaw_url=us.openclaw_url or "",

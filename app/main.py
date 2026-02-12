@@ -208,8 +208,16 @@ _ADMIN_HTML = """<!doctype html>
   <!-- SETTINGS TAB -->
   <div id="tab-settings" class="hidden">
     <div class="card">
-      <h3>OpenAI Configuration</h3>
+      <h3>LLM Provider</h3>
       <div id="set-msg" class="msg"></div>
+      <label>Quick Setup</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px">
+        <button class="btn btn-sm" style="background:#10a37f;color:#fff" onclick="setProvider('openai')">OpenAI</button>
+        <button class="btn btn-sm" style="background:#4e6ef2;color:#fff" onclick="setProvider('deepseek')">DeepSeek</button>
+        <button class="btn btn-sm" style="background:#f55036;color:#fff" onclick="setProvider('groq')">Groq</button>
+        <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="setProvider('openrouter')">OpenRouter</button>
+        <button class="btn btn-sm" style="background:#333;color:#fff" onclick="setProvider('ollama')">Ollama (Local)</button>
+      </div>
       <label>API Key</label>
       <input id="s-apikey" type="password" placeholder="sk-..."/>
       <p class="text-sm" id="s-apikey-status"></p>
@@ -219,13 +227,35 @@ _ADMIN_HTML = """<!doctype html>
         <div><label>Chat Model</label><input id="s-chat" placeholder="gpt-4o-mini"/></div>
         <div><label>ASR Model</label><input id="s-asr" placeholder="whisper-1"/></div>
       </div>
-      <div class="row2">
-        <div><label>TTS Model</label><input id="s-tts" placeholder="tts-1"/></div>
-        <div><label>TTS Voice</label><input id="s-voice" placeholder="alloy"/></div>
+    </div>
+    <div class="card">
+      <h3>TTS (Text-to-Speech)</h3>
+      <label>TTS Provider</label>
+      <select id="s-tts-provider" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:0.95em;margin-bottom:8px" onchange="onTtsProviderChange()">
+        <option value="">OpenAI TTS (requires API key)</option>
+        <option value="edge">Edge TTS (free, no key needed)</option>
+      </select>
+      <div id="tts-openai-fields">
+        <div class="row2">
+          <div><label>TTS Model</label><input id="s-tts" placeholder="tts-1"/></div>
+          <div><label>TTS Voice</label><input id="s-voice" placeholder="alloy"/></div>
+        </div>
+      </div>
+      <div id="tts-edge-fields" class="hidden">
+        <label>Voice</label>
+        <select id="s-edge-voice" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:0.95em">
+          <option value="xiaoxiao">Xiaoxiao (Chinese female, warm)</option>
+          <option value="yunxi">Yunxi (Chinese male)</option>
+          <option value="xiaoyi">Xiaoyi (Chinese female, lively)</option>
+          <option value="jenny">Jenny (English female)</option>
+          <option value="guy">Guy (English male)</option>
+          <option value="aria">Aria (English female, natural)</option>
+        </select>
+        <p class="text-sm" style="margin-top:4px;color:#16a34a">No API key required for Edge TTS</p>
       </div>
     </div>
     <div class="card">
-      <h3>OpenClaw Configuration</h3>
+      <h3>OpenClaw Agent</h3>
       <label>URL</label>
       <input id="s-claw-url" placeholder="https://your-openclaw-instance/v1"/>
       <label>Token</label>
@@ -370,6 +400,30 @@ async function delReminder(id) {
   } catch(e) { showMsg('rem-msg', e.message, true); }
 }
 
+// ── LLM Provider Presets ──
+const PROVIDERS = {
+  openai:     { url: 'https://api.openai.com/v1',          chat: 'gpt-4o-mini',              asr: 'whisper-1' },
+  deepseek:   { url: 'https://api.deepseek.com/v1',        chat: 'deepseek-chat',            asr: 'whisper-1' },
+  groq:       { url: 'https://api.groq.com/openai/v1',     chat: 'llama-3.3-70b-versatile',  asr: 'whisper-large-v3' },
+  openrouter: { url: 'https://openrouter.ai/api/v1',       chat: 'anthropic/claude-sonnet-4', asr: 'whisper-1' },
+  ollama:     { url: 'http://localhost:11434/v1',           chat: 'qwen2.5:7b',               asr: 'whisper-1' },
+};
+
+function setProvider(name) {
+  const p = PROVIDERS[name];
+  if (!p) return;
+  document.getElementById('s-baseurl').value = p.url;
+  document.getElementById('s-chat').value = p.chat;
+  document.getElementById('s-asr').value = p.asr;
+  showMsg('set-msg', name.charAt(0).toUpperCase() + name.slice(1) + ' preset applied (remember to set API key & save)', false);
+}
+
+function onTtsProviderChange() {
+  const val = document.getElementById('s-tts-provider').value;
+  document.getElementById('tts-openai-fields').classList.toggle('hidden', val === 'edge');
+  document.getElementById('tts-edge-fields').classList.toggle('hidden', val !== 'edge');
+}
+
 // ── Settings ──
 async function loadSettings() {
   try {
@@ -379,8 +433,15 @@ async function loadSettings() {
     document.getElementById('s-baseurl').value = s.openai_base_url;
     document.getElementById('s-chat').value = s.openai_chat_model;
     document.getElementById('s-asr').value = s.openai_asr_model;
-    document.getElementById('s-tts').value = s.openai_tts_model;
-    document.getElementById('s-voice').value = s.openai_tts_voice;
+    // TTS provider
+    document.getElementById('s-tts-provider').value = s.tts_provider || '';
+    onTtsProviderChange();
+    if (s.tts_provider === 'edge') {
+      document.getElementById('s-edge-voice').value = s.openai_tts_voice || 'xiaoxiao';
+    } else {
+      document.getElementById('s-tts').value = s.openai_tts_model;
+      document.getElementById('s-voice').value = s.openai_tts_voice;
+    }
     document.getElementById('s-claw-url').value = s.openclaw_url;
     document.getElementById('s-claw-token').value = '';
     document.getElementById('s-claw-status').textContent = s.openclaw_token_set ? 'Token is set' : 'No token configured';
@@ -392,12 +453,19 @@ async function saveSettings() {
   const body = {};
   const apikey = document.getElementById('s-apikey').value;
   if (apikey) body.openai_api_key = apikey;
-  const baseurl = document.getElementById('s-baseurl').value.trim();
-  body.openai_base_url = baseurl;
+  body.openai_base_url = document.getElementById('s-baseurl').value.trim();
   body.openai_chat_model = document.getElementById('s-chat').value.trim();
   body.openai_asr_model = document.getElementById('s-asr').value.trim();
-  body.openai_tts_model = document.getElementById('s-tts').value.trim();
-  body.openai_tts_voice = document.getElementById('s-voice').value.trim();
+  // TTS
+  const ttsProvider = document.getElementById('s-tts-provider').value;
+  body.tts_provider = ttsProvider;
+  if (ttsProvider === 'edge') {
+    body.openai_tts_model = '';
+    body.openai_tts_voice = document.getElementById('s-edge-voice').value;
+  } else {
+    body.openai_tts_model = document.getElementById('s-tts').value.trim();
+    body.openai_tts_voice = document.getElementById('s-voice').value.trim();
+  }
   body.openclaw_url = document.getElementById('s-claw-url').value.trim();
   const clawToken = document.getElementById('s-claw-token').value;
   if (clawToken) body.openclaw_token = clawToken;

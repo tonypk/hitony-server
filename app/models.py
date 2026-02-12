@@ -38,11 +38,14 @@ class UserSettings(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
 
-    # OpenAI settings (api_key encrypted at rest via Fernet)
+    # LLM settings (OpenAI-compatible: OpenAI, DeepSeek, Groq, OpenRouter, Ollama)
     openai_api_key_enc = Column(Text, default="")
     openai_base_url = Column(String(512), default="")
     openai_chat_model = Column(String(64), default="")
     openai_asr_model = Column(String(64), default="")
+
+    # TTS settings (provider: "openai" or "edge")
+    tts_provider = Column(String(32), default="")  # "" = openai (default)
     openai_tts_model = Column(String(64), default="")
     openai_tts_voice = Column(String(32), default="")
 

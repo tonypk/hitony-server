@@ -55,6 +55,7 @@ class SettingsUpdate(BaseModel):
     openai_base_url: Optional[str] = None
     openai_chat_model: Optional[str] = None
     openai_asr_model: Optional[str] = None
+    tts_provider: Optional[str] = None
     openai_tts_model: Optional[str] = None
     openai_tts_voice: Optional[str] = None
     openclaw_url: Optional[str] = None
@@ -66,6 +67,7 @@ class SettingsOut(BaseModel):
     openai_base_url: str
     openai_chat_model: str
     openai_asr_model: str
+    tts_provider: str
     openai_tts_model: str
     openai_tts_voice: str
     openclaw_url: str
@@ -187,6 +189,7 @@ async def get_settings(
         openai_base_url=s.openai_base_url,
         openai_chat_model=s.openai_chat_model,
         openai_asr_model=s.openai_asr_model,
+        tts_provider=s.tts_provider or "",
         openai_tts_model=s.openai_tts_model,
         openai_tts_voice=s.openai_tts_voice,
         openclaw_url=s.openclaw_url,
@@ -216,6 +219,8 @@ async def update_settings(
         s.openai_chat_model = req.openai_chat_model
     if req.openai_asr_model is not None:
         s.openai_asr_model = req.openai_asr_model
+    if req.tts_provider is not None:
+        s.tts_provider = req.tts_provider
     if req.openai_tts_model is not None:
         s.openai_tts_model = req.openai_tts_model
     if req.openai_tts_voice is not None:

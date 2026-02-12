@@ -35,8 +35,22 @@ async def init_db():
         from . import models  # noqa: ensure models are registered
         await conn.run_sync(Base.metadata.create_all)
 
+    # Add missing columns for schema upgrades (SQLite ALTER TABLE)
+    await _add_column_if_missing(engine, "user_settings", "tts_provider", "VARCHAR(32) DEFAULT ''")
+
     logger.info(f"Database initialized at {DB_PATH}")
     await _migrate_legacy_devices()
+
+
+async def _add_column_if_missing(engine, table: str, column: str, col_type: str):
+    """Add a column to an existing table if it doesn't exist (SQLite schema migration)."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+            logger.info(f"Migration: added column {table}.{column}")
+        except Exception:
+            pass  # Column already exists
 
 
 async def _migrate_legacy_devices():

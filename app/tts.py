@@ -50,7 +50,20 @@ def _resample_24k_to_16k(pcm_24k: bytes) -> bytes:
 
 
 async def synthesize_tts(text: str, session: Optional[Session] = None) -> list:
-    """Synthesize TTS using OpenAI API and return list of Opus packets"""
+    """Synthesize TTS using configured provider and return list of Opus packets.
+    Supports 'openai' (default) and 'edge' (free, no API key needed).
+    """
+    # Check TTS provider
+    tts_provider = ""
+    if session:
+        tts_provider = session.config.get("tts_provider", "")
+    if tts_provider == "edge":
+        from .edge_tts_synth import synthesize_edge_tts
+        tts_voice = (session.config.get("openai_tts_voice", "xiaoxiao")
+                     if session else "xiaoxiao")
+        return await synthesize_edge_tts(text, voice=tts_voice)
+
+    # Default: OpenAI TTS
     client = _get_client(session)
     tts_model = (session.config.get("openai_tts_model", settings.openai_tts_model)
                  if session else settings.openai_tts_model)

@@ -17,6 +17,8 @@ class UserConfig:
     openai_base_url: str = ""
     openai_chat_model: str = ""
     openai_asr_model: str = ""
+
+    tts_provider: str = ""  # "" or "openai" = OpenAI TTS, "edge" = Edge TTS
     openai_tts_model: str = ""
     openai_tts_voice: str = ""
 
