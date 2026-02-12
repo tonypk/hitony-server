@@ -43,6 +43,7 @@ async def init_db():
     await _add_column_if_missing(engine, "user_settings", "youtube_api_key_enc", "TEXT DEFAULT ''")
     await _add_column_if_missing(engine, "user_settings", "notion_token_enc", "TEXT DEFAULT ''")
     await _add_column_if_missing(engine, "user_settings", "notion_database_id", "VARCHAR(64) DEFAULT ''")
+    await _add_column_if_missing(engine, "devices", "conversation_json", "TEXT DEFAULT '[]'")
 
     logger.info(f"Database initialized at {DB_PATH}")
     await _migrate_legacy_devices()

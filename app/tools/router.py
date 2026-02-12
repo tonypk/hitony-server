@@ -97,6 +97,10 @@ def _build_rules():
          lambda m: {"query": m.group(1).strip()},
          "正在搜索{query}"),
 
+        # ── Conversation reset ────────────────────────────
+        (r"^(?:清空对话|忘掉(?:之前的)?对话|新对话|重新开始|clear\s+(?:conversation|history|chat)|new\s+chat|reset\s+chat)$",
+         "conversation.reset", lambda m: {}, "好的，对话已清空"),
+
         # ── Voice note → Notion ──────────────────────────
         (r"^(?:记一下|记录一下|笔记|帮我记|备忘|note)\s*[,，:：]?\s*(.+)",
          "note.save",

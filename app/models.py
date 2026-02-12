@@ -28,6 +28,7 @@ class Device(Base):
     fw_version = Column(String(32), default="")
     last_seen = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    conversation_json = Column(Text, default="[]")
 
     owner = relationship("User", back_populates="devices")
 

@@ -17,7 +17,7 @@ from .config import settings
 from .session import Session, UserConfig
 from .pipeline import run_pipeline, ws_send_safe
 from .registry import registry
-from .llm import reset_conversation
+from .llm import reset_conversation, load_conversation, get_conversation
 from .database import async_session_factory
 from .models import Device, UserSettings
 from .auth import verify_token, decrypt_secret
@@ -245,6 +245,18 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
     # Register active connection for server-push (reminders, etc.)
     _active_connections[device_id] = (ws, session)
 
+    # Load persistent conversation history from DB
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(select(Device).where(Device.device_id == device_id))
+            device_record = result.scalar_one_or_none()
+            if device_record and device_record.conversation_json:
+                conv = json.loads(device_record.conversation_json)
+                if isinstance(conv, list) and conv:
+                    load_conversation(device_id, conv)
+    except Exception as e:
+        logger.warning(f"[{session.session_id}] Failed to load conversation history: {e}")
+
     try:
         async for message in ws:
             if isinstance(message, str):
@@ -290,7 +302,19 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
             except Exception as e:
                 logger.error(f"[{session.session_id}] Failed to auto-save meeting: {e}")
 
-        reset_conversation(session.session_id)
+        # Save conversation history to DB (persist across reconnects)
+        try:
+            conv = get_conversation(device_id)
+            async with async_session_factory() as db:
+                result = await db.execute(select(Device).where(Device.device_id == device_id))
+                device_record = result.scalar_one_or_none()
+                if device_record:
+                    device_record.conversation_json = json.dumps(conv[-20:], ensure_ascii=False)
+                    await db.commit()
+        except Exception as e:
+            logger.warning(f"[{session.session_id}] Failed to save conversation history: {e}")
+        # Clean up in-memory (will be reloaded on next connect)
+        reset_conversation(device_id)
         logger.info(f"[{session.session_id}] Session ended for device {device_id}")
 
 

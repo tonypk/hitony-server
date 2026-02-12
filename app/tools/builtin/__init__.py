@@ -7,3 +7,4 @@ from . import weather
 from . import timer
 from . import search
 from . import notion
+from . import conversation

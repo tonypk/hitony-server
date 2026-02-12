@@ -18,7 +18,7 @@ from .config import settings
 from .session import Session
 from .asr import transcribe_pcm
 from .tts import synthesize_tts
-from .llm import plan_intent
+from .llm import plan_intent, append_user_message, append_assistant_message
 from .tools import route_intent, execute_tool, get_tool
 
 logger = logging.getLogger(__name__)
@@ -187,6 +187,10 @@ async def _process_and_speak(ws, session, text: str):
             tool_name = match.tool
             args = match.args
             reply_hint = match.reply_hint
+            # Add user+hint to conversation history (LLM path handles its own)
+            append_user_message(session.device_id, text)
+            if reply_hint:
+                append_assistant_message(session.device_id, reply_hint)
             logger.info(f"[{sid}] Router: {tool_name}")
 
     # 3. Fall back to LLM planner
@@ -285,6 +289,8 @@ async def _process_and_speak(ws, session, text: str):
         else:
             await _send_tts_round(ws, session, result_packets, result.text)
         tts_session_open = False
+        # Capture tool result in conversation history
+        append_assistant_message(session.device_id, result.text)
 
     elif result.type == "ask_user":
         if tts_session_open:

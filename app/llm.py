@@ -9,7 +9,9 @@ from .session import Session
 
 logger = logging.getLogger(__name__)
 
-_conversations: Dict[str, List[dict]] = {}
+_conversations: Dict[str, List[dict]] = {}  # keyed by device_id
+
+MAX_HISTORY = 20
 
 TOOL_PROMPT = """You are HiTony, a smart voice assistant. Analyze the user's request and respond in JSON.
 Today's date/time: {current_datetime}
@@ -52,6 +54,10 @@ Search rules:
 - Use for questions needing real-time or factual data you don't know
 - Triggers: 搜索/搜一下/查一下/search
 
+Conversation rules:
+- Clear/reset conversation → use "conversation.reset"
+- Triggers: 清空对话/忘掉对话/新对话/重新开始/clear chat
+
 Examples:
 - "播放周杰伦的歌" → {{"tool": "youtube.play", "args": {{"query": "周杰伦 热门歌曲"}}, "reply_hint": "正在播放周杰伦的歌"}}
 - "放首歌" → {{"tool": "youtube.play", "args": {{"query": "热门歌曲"}}, "reply_hint": "正在播放音乐"}}
@@ -69,10 +75,42 @@ Examples:
 IMPORTANT: Always respond with valid JSON only. No markdown, no code blocks. Respond in the same language as the user."""
 
 
-def reset_conversation(session_id: str):
-    if session_id in _conversations:
-        del _conversations[session_id]
-        logger.info(f"[{session_id}] Conversation history cleared")
+def reset_conversation(device_id: str):
+    """Clear conversation history for a device."""
+    if device_id in _conversations:
+        del _conversations[device_id]
+        logger.info(f"[{device_id}] Conversation history cleared")
+
+
+def load_conversation(device_id: str, history: List[dict]):
+    """Load conversation history from DB (called on WS connect)."""
+    _conversations[device_id] = history[-MAX_HISTORY:]
+    logger.info(f"[{device_id}] Loaded {len(_conversations[device_id])} history messages")
+
+
+def get_conversation(device_id: str) -> List[dict]:
+    """Get current conversation history (for saving to DB on disconnect)."""
+    return _conversations.get(device_id, [])
+
+
+def append_user_message(device_id: str, text: str):
+    """Append a user message to conversation history (for router-matched paths)."""
+    if device_id not in _conversations:
+        _conversations[device_id] = []
+    _conversations[device_id].append({"role": "user", "content": text})
+    if len(_conversations[device_id]) > MAX_HISTORY:
+        _conversations[device_id][:] = _conversations[device_id][-MAX_HISTORY:]
+
+
+def append_assistant_message(device_id: str, text: str):
+    """Append an assistant response to conversation history."""
+    if not text:
+        return
+    if device_id not in _conversations:
+        _conversations[device_id] = []
+    _conversations[device_id].append({"role": "assistant", "content": text})
+    if len(_conversations[device_id]) > MAX_HISTORY:
+        _conversations[device_id][:] = _conversations[device_id][-MAX_HISTORY:]
 
 
 def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
@@ -90,15 +128,16 @@ def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
 async def plan_intent(text: str, session_id: str, session: Optional[Session] = None) -> dict:
     """Classify user intent into a tool call via LLM."""
     client = _get_client(session)
+    device_id = session.device_id if session else session_id
 
-    if session_id not in _conversations:
-        _conversations[session_id] = []
+    if device_id not in _conversations:
+        _conversations[device_id] = []
 
-    history = _conversations[session_id]
+    history = _conversations[device_id]
     history.append({"role": "user", "content": text})
 
-    if len(history) > 20:
-        history[:] = history[-20:]
+    if len(history) > MAX_HISTORY:
+        history[:] = history[-MAX_HISTORY:]
 
     from .tools import tool_descriptions_for_llm
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
@@ -116,17 +155,27 @@ async def plan_intent(text: str, session_id: str, session: Optional[Session] = N
     )
 
     raw = response.choices[0].message.content.strip()
-    logger.info(f"[{session_id}] Intent raw: {raw[:200]}")
+    logger.info(f"[{device_id}] Intent raw: {raw[:200]}")
 
     try:
         intent = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning(f"[{session_id}] Intent JSON parse failed, treating as chat")
+        logger.warning(f"[{device_id}] Intent JSON parse failed, treating as chat")
         intent = {"tool": "chat", "args": {"response": raw}}
 
     # Backward compat: convert old action format to tool format
     if "action" in intent and "tool" not in intent:
         intent = _migrate_old_format(intent)
+
+    # Capture assistant response in conversation history
+    if intent.get("tool") == "chat":
+        resp = intent.get("args", {}).get("response", "")
+        if resp:
+            history.append({"role": "assistant", "content": resp})
+    else:
+        hint = intent.get("reply_hint", "")
+        if hint:
+            history.append({"role": "assistant", "content": hint})
 
     return intent
 
