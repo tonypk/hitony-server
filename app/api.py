@@ -58,6 +58,9 @@ class SettingsUpdate(BaseModel):
     tts_provider: Optional[str] = None
     openai_tts_model: Optional[str] = None
     openai_tts_voice: Optional[str] = None
+    weather_api_key: Optional[str] = None
+    weather_city: Optional[str] = None
+    tavily_api_key: Optional[str] = None
 
 class SettingsOut(BaseModel):
     openai_api_key_set: bool
@@ -67,6 +70,9 @@ class SettingsOut(BaseModel):
     tts_provider: str
     openai_tts_model: str
     openai_tts_voice: str
+    weather_api_key_set: bool
+    weather_city: str
+    tavily_api_key_set: bool
 
 
 # ── Auth ──────────────────────────────────────────────────────
@@ -186,6 +192,9 @@ async def get_settings(
         tts_provider=s.tts_provider or "",
         openai_tts_model=s.openai_tts_model,
         openai_tts_voice=s.openai_tts_voice,
+        weather_api_key_set=bool(s.weather_api_key_enc),
+        weather_city=s.weather_city or "",
+        tavily_api_key_set=bool(s.tavily_api_key_enc),
     )
 
 
@@ -216,6 +225,12 @@ async def update_settings(
         s.openai_tts_model = req.openai_tts_model
     if req.openai_tts_voice is not None:
         s.openai_tts_voice = req.openai_tts_voice
+    if req.weather_api_key is not None:
+        s.weather_api_key_enc = encrypt_secret(req.weather_api_key) if req.weather_api_key else ""
+    if req.weather_city is not None:
+        s.weather_city = req.weather_city
+    if req.tavily_api_key is not None:
+        s.tavily_api_key_enc = encrypt_secret(req.tavily_api_key) if req.tavily_api_key else ""
     await db.commit()
     logger.info(f"Settings updated for user {user.email}")
     return {"ok": True}

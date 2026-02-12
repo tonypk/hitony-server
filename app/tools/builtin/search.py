@@ -24,11 +24,12 @@ _TAVILY_KEY = os.getenv("TAVILY_API_KEY", "")
     category="info",
 )
 async def web_search(query: str, session=None, **kwargs) -> ToolResult:
-    if not _TAVILY_KEY:
-        # Fallback: let LLM answer from its knowledge
+    # Per-user key > env var
+    tavily_key = (session.config.tavily_api_key if session and session.config.tavily_api_key else _TAVILY_KEY)
+    if not tavily_key:
         return ToolResult(
             type="tts",
-            text=f"抱歉，搜索服务还没有配置。我根据已有知识回答：关于「{query}」，请稍后配置TAVILY_API_KEY来启用搜索。",
+            text=f"抱歉，搜索服务还没有配置。请在管理后台设置Tavily API密钥来启用搜索。",
         )
 
     try:
@@ -36,7 +37,7 @@ async def web_search(query: str, session=None, **kwargs) -> ToolResult:
             resp = await client.post(
                 "https://api.tavily.com/search",
                 json={
-                    "api_key": _TAVILY_KEY,
+                    "api_key": tavily_key,
                     "query": query,
                     "search_depth": "basic",
                     "include_answer": True,

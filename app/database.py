@@ -37,6 +37,9 @@ async def init_db():
 
     # Add missing columns for schema upgrades (SQLite ALTER TABLE)
     await _add_column_if_missing(engine, "user_settings", "tts_provider", "VARCHAR(32) DEFAULT ''")
+    await _add_column_if_missing(engine, "user_settings", "weather_api_key_enc", "TEXT DEFAULT ''")
+    await _add_column_if_missing(engine, "user_settings", "weather_city", "VARCHAR(64) DEFAULT ''")
+    await _add_column_if_missing(engine, "user_settings", "tavily_api_key_enc", "TEXT DEFAULT ''")
 
     logger.info(f"Database initialized at {DB_PATH}")
     await _migrate_legacy_devices()

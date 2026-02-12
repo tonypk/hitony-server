@@ -202,6 +202,9 @@ async def _load_user_config(device_id: str, token: str) -> UserConfig | None:
                 tts_provider=us.tts_provider or "",
                 openai_tts_model=us.openai_tts_model or "",
                 openai_tts_voice=us.openai_tts_voice or "",
+                weather_api_key=decrypt_secret(us.weather_api_key_enc) if us.weather_api_key_enc else "",
+                weather_city=us.weather_city or "",
+                tavily_api_key=decrypt_secret(us.tavily_api_key_enc) if us.tavily_api_key_enc else "",
             )
     except Exception as e:
         logger.error(f"DB auth error for {device_id}: {e}")

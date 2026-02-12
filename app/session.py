@@ -22,6 +22,10 @@ class UserConfig:
     openai_tts_model: str = ""
     openai_tts_voice: str = ""
 
+    weather_api_key: str = ""
+    weather_city: str = ""
+    tavily_api_key: str = ""
+
     def get(self, field_name: str, fallback: str) -> str:
         """Return user value if set, otherwise fallback to global default."""
         val = getattr(self, field_name, "")

@@ -254,6 +254,18 @@ _ADMIN_HTML = """<!doctype html>
         <p class="text-sm" style="margin-top:4px;color:#16a34a">No API key required for Edge TTS</p>
       </div>
     </div>
+    <div class="card">
+      <h3>Tool API Keys</h3>
+      <p class="text-sm" style="margin-bottom:8px">Configure API keys for weather and web search tools. Each service has a free tier.</p>
+      <label>OpenWeatherMap API Key <a href="https://openweathermap.org/api" target="_blank" style="font-size:0.8em">(free signup)</a></label>
+      <input id="s-weather-key" type="password" placeholder="your-weather-api-key"/>
+      <p class="text-sm" id="s-weather-key-status"></p>
+      <label>Default City</label>
+      <input id="s-weather-city" placeholder="Singapore"/>
+      <label style="margin-top:12px">Tavily API Key <a href="https://tavily.com" target="_blank" style="font-size:0.8em">(1000 free/month)</a></label>
+      <input id="s-tavily-key" type="password" placeholder="tvly-..."/>
+      <p class="text-sm" id="s-tavily-key-status"></p>
+    </div>
     <button class="btn btn-primary mt" style="width:100%" onclick="saveSettings()">Save Settings</button>
   </div>
 </div>
@@ -432,6 +444,12 @@ async function loadSettings() {
       document.getElementById('s-tts').value = s.openai_tts_model;
       document.getElementById('s-voice').value = s.openai_tts_voice;
     }
+    // Tool API keys
+    document.getElementById('s-weather-key').value = '';
+    document.getElementById('s-weather-key-status').textContent = s.weather_api_key_set ? 'Weather API key is set' : 'No weather API key configured';
+    document.getElementById('s-weather-city').value = s.weather_city || '';
+    document.getElementById('s-tavily-key').value = '';
+    document.getElementById('s-tavily-key-status').textContent = s.tavily_api_key_set ? 'Tavily API key is set' : 'No Tavily API key configured';
   } catch(e) {}
 }
 
@@ -452,6 +470,12 @@ async function saveSettings() {
     body.openai_tts_model = document.getElementById('s-tts').value.trim();
     body.openai_tts_voice = document.getElementById('s-voice').value.trim();
   }
+  // Tool API keys
+  const weatherKey = document.getElementById('s-weather-key').value;
+  if (weatherKey) body.weather_api_key = weatherKey;
+  body.weather_city = document.getElementById('s-weather-city').value.trim();
+  const tavilyKey = document.getElementById('s-tavily-key').value;
+  if (tavilyKey) body.tavily_api_key = tavilyKey;
   try {
     await api('/api/settings', 'PUT', body);
     showMsg('set-msg', 'Settings saved', false);

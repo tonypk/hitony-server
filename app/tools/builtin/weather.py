@@ -25,11 +25,14 @@ _DEFAULT_CITY = os.getenv("WEATHER_DEFAULT_CITY", "Singapore")
     category="info",
 )
 async def weather_query(query: str = "", city: str = "", session=None, **kwargs) -> ToolResult:
-    if not _API_KEY:
-        return ToolResult(type="tts", text="抱歉，天气服务还没有配置。请在服务器设置OPENWEATHERMAP_API_KEY。")
+    # Per-user key > env var
+    api_key = (session.config.weather_api_key if session and session.config.weather_api_key else _API_KEY)
+    if not api_key:
+        return ToolResult(type="tts", text="抱歉，天气服务还没有配置。请在管理后台设置天气API密钥。")
 
-    # Determine city from query or use default
-    target_city = city or _DEFAULT_CITY
+    # Determine city: explicit arg > per-user default > env default
+    default_city = (session.config.weather_city if session and session.config.weather_city else _DEFAULT_CITY)
+    target_city = city or default_city
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -37,7 +40,7 @@ async def weather_query(query: str = "", city: str = "", session=None, **kwargs)
                 "https://api.openweathermap.org/data/2.5/weather",
                 params={
                     "q": target_city,
-                    "appid": _API_KEY,
+                    "appid": api_key,
                     "units": "metric",
                     "lang": "zh_cn",
                 },
