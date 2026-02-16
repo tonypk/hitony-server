@@ -404,3 +404,117 @@ async def delete_meeting(
     await db.delete(meeting)
     await db.commit()
     return {"ok": True}
+
+
+# ── Conversation History ────────────────────────────────────
+
+@router.get("/devices/{device_id}/conversation")
+async def get_conversation(
+    device_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get conversation history for a device."""
+    import json as _json
+    result = await db.execute(
+        select(Device).where(Device.device_id == device_id, Device.user_id == user.id)
+    )
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    try:
+        messages = _json.loads(device.conversation_json) if device.conversation_json else []
+    except Exception:
+        messages = []
+    return {"device_id": device_id, "messages": messages}
+
+
+@router.delete("/devices/{device_id}/conversation")
+async def clear_conversation(
+    device_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear conversation history for a device."""
+    result = await db.execute(
+        select(Device).where(Device.device_id == device_id, Device.user_id == user.id)
+    )
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.conversation_json = "[]"
+    await db.commit()
+    return {"ok": True}
+
+
+# ── Usage Statistics ────────────────────────────────────────
+
+@router.get("/stats")
+async def get_stats(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get usage statistics for the current user."""
+    from sqlalchemy import func
+
+    # Device count
+    dev_result = await db.execute(
+        select(func.count()).select_from(Device).where(Device.user_id == user.id)
+    )
+    device_count = dev_result.scalar() or 0
+
+    # Meeting stats
+    mtg_result = await db.execute(
+        select(
+            func.count(),
+            func.coalesce(func.sum(Meeting.duration_s), 0),
+        ).where(Meeting.user_id == user.id)
+    )
+    mtg_row = mtg_result.one()
+    meeting_count = mtg_row[0] or 0
+    meeting_total_s = mtg_row[1] or 0
+
+    # Reminder stats
+    rem_result = await db.execute(
+        select(func.count()).select_from(Reminder).where(Reminder.user_id == user.id)
+    )
+    reminder_count = rem_result.scalar() or 0
+
+    rem_delivered = await db.execute(
+        select(func.count()).select_from(Reminder).where(
+            Reminder.user_id == user.id, Reminder.delivered == 1
+        )
+    )
+    reminder_delivered = rem_delivered.scalar() or 0
+
+    # Conversation message counts per device
+    devices_result = await db.execute(
+        select(Device.device_id, Device.name, Device.conversation_json, Device.last_seen)
+        .where(Device.user_id == user.id)
+    )
+    import json as _json
+    device_stats = []
+    total_messages = 0
+    for row in devices_result:
+        try:
+            conv = _json.loads(row.conversation_json) if row.conversation_json else []
+        except Exception:
+            conv = []
+        msg_count = len(conv)
+        total_messages += msg_count
+        device_stats.append({
+            "device_id": row.device_id,
+            "name": row.name or row.device_id,
+            "message_count": msg_count,
+            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+        })
+
+    return {
+        "devices": device_count,
+        "meetings": meeting_count,
+        "meeting_duration_s": meeting_total_s,
+        "reminders": reminder_count,
+        "reminders_delivered": reminder_delivered,
+        "total_messages": total_messages,
+        "device_stats": device_stats,
+    }

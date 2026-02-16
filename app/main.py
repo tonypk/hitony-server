@@ -174,6 +174,14 @@ _ADMIN_HTML = """<!doctype html>
     .text-center { text-align: center; }
     .text-sm { font-size: 0.85em; color: #666; }
     a { color: #2563eb; cursor: pointer; }
+
+    /* Chat bubbles */
+    .chat-msg { margin: 6px 0; display: flex; }
+    .chat-msg.user { justify-content: flex-end; }
+    .chat-msg .bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9em; line-height: 1.4; word-break: break-word; }
+    .chat-msg.user .bubble { background: #2563eb; color: white; border-bottom-right-radius: 4px; }
+    .chat-msg.assistant .bubble { background: #e5e7eb; color: #333; border-bottom-left-radius: 4px; }
+    .chat-role { font-size: 0.7em; color: #999; margin-bottom: 2px; }
   </style>
 </head>
 <body>
@@ -204,6 +212,7 @@ _ADMIN_HTML = """<!doctype html>
 
   <div class="tabs">
     <div class="tab active" onclick="showTab('devices')">Devices</div>
+    <div class="tab" onclick="showTab('history')">History</div>
     <div class="tab" onclick="showTab('meetings')">Meetings</div>
     <div class="tab" onclick="showTab('reminders')">Reminders</div>
     <div class="tab" onclick="showTab('settings')">Settings</div>
@@ -230,6 +239,33 @@ _ADMIN_HTML = """<!doctype html>
         <tbody id="dev-tbody"></tbody>
       </table>
       <p id="dev-empty" class="text-sm mt text-center hidden">No devices yet</p>
+    </div>
+    <div class="card" id="stats-card" style="display:none">
+      <h3>Usage Overview</h3>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center">
+        <div><div style="font-size:1.5em;font-weight:600" id="stat-meetings">-</div><div class="text-sm">Meetings</div></div>
+        <div><div style="font-size:1.5em;font-weight:600" id="stat-reminders">-</div><div class="text-sm">Reminders</div></div>
+        <div><div style="font-size:1.5em;font-weight:600" id="stat-messages">-</div><div class="text-sm">Messages</div></div>
+      </div>
+      <div id="stat-details" class="text-sm mt" style="color:#666"></div>
+    </div>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div id="tab-history" class="hidden">
+    <div class="card">
+      <h3>Conversation History</h3>
+      <div style="margin-bottom:12px">
+        <label>Select Device</label>
+        <select id="hist-device" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:0.95em" onchange="loadConversation()">
+          <option value="">-- Select device --</option>
+        </select>
+      </div>
+      <div id="hist-msg" class="msg"></div>
+      <div id="hist-chat" style="max-height:400px;overflow-y:auto;border:1px solid #eee;border-radius:6px;padding:8px;display:none">
+      </div>
+      <p id="hist-empty" class="text-sm mt text-center hidden">No conversation history</p>
+      <button id="hist-clear-btn" class="btn btn-danger btn-sm mt" style="display:none" onclick="clearConversation()">Clear History</button>
     </div>
   </div>
 
@@ -386,6 +422,7 @@ function enterApp() {
   loadDevices();
   loadReminders();
   loadSettings();
+  loadStats();
 }
 
 // ── API helper ──
@@ -627,6 +664,86 @@ function showTab(name) {
   event.target.classList.add('active');
   if (name === 'meetings') loadMeetings();
   if (name === 'reminders') loadReminders();
+  if (name === 'history') loadHistoryDevices();
+}
+
+// ── Stats ──
+async function loadStats() {
+  try {
+    const s = await api('/api/stats');
+    document.getElementById('stat-meetings').textContent = s.meetings;
+    document.getElementById('stat-reminders').textContent = s.reminders;
+    document.getElementById('stat-messages').textContent = s.total_messages;
+    const details = [];
+    if (s.meeting_duration_s > 0) {
+      const mins = Math.floor(s.meeting_duration_s / 60);
+      details.push('Total recording: ' + mins + ' min');
+    }
+    if (s.reminders_delivered > 0) {
+      details.push(s.reminders_delivered + ' reminders delivered');
+    }
+    document.getElementById('stat-details').textContent = details.join(' · ');
+    document.getElementById('stats-card').style.display = '';
+  } catch(e) {}
+}
+
+// ── Conversation History ──
+let _histDevices = [];
+
+async function loadHistoryDevices() {
+  try {
+    const devices = await api('/api/devices');
+    _histDevices = devices;
+    const sel = document.getElementById('hist-device');
+    const curVal = sel.value;
+    sel.innerHTML = '<option value="">-- Select device --</option>';
+    devices.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.device_id;
+      opt.textContent = (d.name || d.device_id) + ' (' + d.device_id + ')';
+      sel.appendChild(opt);
+    });
+    if (curVal) { sel.value = curVal; loadConversation(); }
+    else if (devices.length === 1) { sel.value = devices[0].device_id; loadConversation(); }
+  } catch(e) {}
+}
+
+async function loadConversation() {
+  const deviceId = document.getElementById('hist-device').value;
+  const chatEl = document.getElementById('hist-chat');
+  const emptyEl = document.getElementById('hist-empty');
+  const clearBtn = document.getElementById('hist-clear-btn');
+  chatEl.style.display = 'none'; chatEl.innerHTML = '';
+  emptyEl.classList.add('hidden');
+  clearBtn.style.display = 'none';
+  if (!deviceId) return;
+  try {
+    const data = await api('/api/devices/' + encodeURIComponent(deviceId) + '/conversation');
+    const msgs = data.messages || [];
+    if (msgs.length === 0) { emptyEl.classList.remove('hidden'); return; }
+    chatEl.style.display = '';
+    clearBtn.style.display = '';
+    msgs.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + (m.role || 'user');
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.textContent = m.content || '';
+      div.appendChild(bubble);
+      chatEl.appendChild(div);
+    });
+    chatEl.scrollTop = chatEl.scrollHeight;
+  } catch(e) { showMsg('hist-msg', e.message, true); }
+}
+
+async function clearConversation() {
+  const deviceId = document.getElementById('hist-device').value;
+  if (!deviceId || !confirm('Clear conversation history for this device?')) return;
+  try {
+    await api('/api/devices/' + encodeURIComponent(deviceId) + '/conversation', 'DELETE');
+    showMsg('hist-msg', 'History cleared', false);
+    loadConversation();
+  } catch(e) { showMsg('hist-msg', e.message, true); }
 }
 
 // ── Utils ──
