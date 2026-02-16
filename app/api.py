@@ -130,6 +130,32 @@ async def list_devices(
     return result.scalars().all()
 
 
+@router.get("/devices/status")
+async def device_status(user: User = Depends(get_current_user)):
+    """Get real-time online/offline status for all user's devices."""
+    from .ws_server import get_active_connection
+    from .database import async_session_factory
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(Device.device_id, Device.name, Device.fw_version)
+            .where(Device.user_id == user.id)
+        )
+        devices = result.all()
+
+    statuses = []
+    for row in devices:
+        conn = get_active_connection(row.device_id)
+        info = {"device_id": row.device_id, "name": row.name or row.device_id,
+                "fw_version": row.fw_version, "online": conn is not None}
+        if conn:
+            _, session = conn
+            info["music_playing"] = getattr(session, "music_playing", False)
+            info["meeting_active"] = getattr(session, "meeting_active", False)
+        statuses.append(info)
+    return statuses
+
+
 @router.post("/devices", response_model=DeviceOut, status_code=201)
 async def add_device(
     req: DeviceCreate,

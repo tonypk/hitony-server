@@ -61,6 +61,32 @@ async def timer_set(seconds: str, label: str = "", session=None, **kwargs) -> To
     return ToolResult(type="tts", text=f"好的，{time_str}倒计时已开始。")
 
 
+@register_tool(
+    "timer.cancel",
+    description="Cancel all active timers for the current session",
+    params=[],
+    category="timer",
+)
+async def timer_cancel(session=None, **kwargs) -> ToolResult:
+    if not session:
+        return ToolResult(type="error", text="无法取消倒计时。")
+
+    sid = session.session_id
+    tasks = _active_timers.get(sid, [])
+    # Filter to only running tasks
+    active = [t for t in tasks if not t.done()]
+
+    if not active:
+        return ToolResult(type="tts", text="当前没有正在运行的倒计时。")
+
+    for t in active:
+        t.cancel()
+
+    count = len(active)
+    _active_timers[sid] = []
+    return ToolResult(type="tts", text=f"已取消{count}个倒计时。")
+
+
 async def _timer_fire(seconds: int, label: str, device_id: str, session_id: str):
     """Wait for the timer duration, then push a TTS notification to the device."""
     try:

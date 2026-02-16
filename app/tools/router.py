@@ -111,6 +111,19 @@ def _build_rules():
          "note.save",
          lambda m: {"content": _strip_punctuation(m.group(1).strip())},
          "正在记录"),
+
+        # ── Reminder management ─────────────────────────
+        (r"^(?:查看提醒|我的提醒|有哪些提醒|提醒列表|list\s+reminders?)$",
+         "reminder.list", lambda m: {}, "查询提醒中"),
+
+        (r"^(?:取消提醒|删除提醒|cancel\s+reminders?)\s*(.*)$",
+         "reminder.cancel",
+         lambda m: {"query": _strip_punctuation(m.group(1).strip()) or "all"},
+         "取消提醒"),
+
+        # ── Timer cancel ────────────────────────────────
+        (r"^(?:取消倒计时|停止倒计时|取消计时|cancel\s+timer)$",
+         "timer.cancel", lambda m: {}, "已取消倒计时"),
     ]
 
     _RULES.clear()

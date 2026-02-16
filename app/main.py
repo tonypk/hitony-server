@@ -281,7 +281,7 @@ _ADMIN_HTML = """<!doctype html>
       <h3>My Devices</h3>
       <div id="dev-msg" class="msg"></div>
       <table>
-        <thead><tr><th>Device ID</th><th>Name</th><th>Last Seen</th><th></th></tr></thead>
+        <thead><tr><th>Device ID</th><th>Name</th><th>Status</th><th>Last Seen</th><th></th></tr></thead>
         <tbody id="dev-tbody"></tbody>
       </table>
       <p id="dev-empty" class="text-sm mt text-center hidden">No devices yet</p>
@@ -499,7 +499,12 @@ async function api(path, method='GET', body=null) {
 // ── Devices ──
 async function loadDevices() {
   try {
-    const devices = await api('/api/devices');
+    const [devices, statuses] = await Promise.all([
+      api('/api/devices'),
+      api('/api/devices/status').catch(() => [])
+    ]);
+    const statusMap = {};
+    statuses.forEach(s => { statusMap[s.device_id] = s; });
     const tbody = document.getElementById('dev-tbody');
     const empty = document.getElementById('dev-empty');
     tbody.innerHTML = '';
@@ -507,8 +512,16 @@ async function loadDevices() {
     empty.classList.add('hidden');
     devices.forEach(d => {
       const seen = d.last_seen ? new Date(d.last_seen).toLocaleString() : 'Never';
+      const st = statusMap[d.device_id];
+      const online = st && st.online;
+      let badge = online
+        ? '<span style="color:#4caf50;font-weight:600">● Online</span>'
+        : '<span style="color:#999">○ Offline</span>';
+      if (online && st.music_playing) badge += ' <span style="color:#ff9800;font-size:0.8em">♪</span>';
+      if (online && st.meeting_active) badge += ' <span style="color:#f44336;font-size:0.8em">●REC</span>';
+      const fw = (st && st.fw_version) ? ` <span style="color:#888;font-size:0.8em">v${st.fw_version}</span>` : '';
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${d.device_id}</td><td>${d.name||'-'}</td><td>${seen}</td>
+      tr.innerHTML = `<td>${d.device_id}${fw}</td><td>${d.name||'-'}</td><td>${badge}</td><td>${seen}</td>
         <td><button class="btn btn-danger btn-sm" onclick="delDevice('${d.device_id}')">Remove</button></td>`;
       tbody.appendChild(tr);
     });
