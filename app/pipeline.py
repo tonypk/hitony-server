@@ -170,6 +170,7 @@ async def _process_and_speak(ws, session, text: str):
     tool_name = None
     args = {}
     reply_hint = ""
+    emotion = ""
 
     # 1. Check pending follow-up from previous ask_user
     if session._pending_tool_call:
@@ -187,6 +188,7 @@ async def _process_and_speak(ws, session, text: str):
             tool_name = match.tool
             args = match.args
             reply_hint = match.reply_hint
+            emotion = _infer_emotion(tool_name)
             # Add user+hint to conversation history (LLM path handles its own)
             append_user_message(session.device_id, text)
             if reply_hint:
@@ -205,7 +207,8 @@ async def _process_and_speak(ws, session, text: str):
         tool_name = intent.get("tool", "chat")
         args = intent.get("args", {})
         reply_hint = intent.get("reply_hint", "")
-        logger.info(f"[{sid}] LLM: tool={tool_name} ({time.monotonic()-t0:.2f}s)")
+        emotion = intent.get("emotion", "")
+        logger.info(f"[{sid}] LLM: tool={tool_name} emotion={emotion} ({time.monotonic()-t0:.2f}s)")
 
     if session.tts_abort or ws.closed:
         return
@@ -219,6 +222,10 @@ async def _process_and_speak(ws, session, text: str):
 
     # Track whether music was paused for this interaction (for auto-resume)
     music_was_paused = session.music_playing and session.music_paused
+
+    # Send expression to device (before TTS, so eyes change as voice starts)
+    if emotion:
+        await _send_expression(ws, session, emotion)
 
     # 5. Handle "chat" (direct response, no tool execution)
     if tool_name == "chat":
@@ -420,6 +427,40 @@ async def _stream_music(ws, session, title: str, generator):
         if not ws.closed:
             await ws_send_safe(ws, json.dumps({"type": "music_end"}), session, "music_end")
         logger.info(f"[{sid}] Music ended: '{title}', {sent} packets sent")
+
+
+# ── Expression helpers ──────────────────────────────────────
+
+# Default emotion for router-matched tools (no LLM to generate emotion)
+_TOOL_EMOTIONS = {
+    "youtube.play": "happy",
+    "player.pause": "neutral",
+    "player.resume": "happy",
+    "player.stop": "neutral",
+    "reminder.set": "happy",
+    "meeting.start": "neutral",
+    "meeting.end": "happy",
+    "meeting.transcribe": "thinking",
+    "weather.query": "thinking",
+    "timer.set": "happy",
+    "web.search": "thinking",
+    "note.save": "happy",
+    "conversation.reset": "wink",
+}
+
+
+def _infer_emotion(tool_name: str) -> str:
+    """Infer emotion from tool name (for router-matched paths without LLM)."""
+    return _TOOL_EMOTIONS.get(tool_name, "")
+
+
+async def _send_expression(ws, session, emotion: str, duration_ms: int = 3000):
+    """Send expression command to device."""
+    if not emotion or emotion == "neutral":
+        return
+    msg = {"type": "expression", "expr": emotion, "duration_ms": duration_ms}
+    await ws_send_safe(ws, json.dumps(msg), session, f"expr:{emotion}")
+    logger.info(f"[{session.session_id}] Expression: {emotion}")
 
 
 BATCH_SIZE = 10
