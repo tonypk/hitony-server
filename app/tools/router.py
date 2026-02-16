@@ -56,6 +56,9 @@ def _build_rules():
         (r"^(?:停止|停止播放|停|别放了|别播了|stop)$",
          "player.stop", lambda m: {}, "已停止"),
 
+        (r"^(?:下一首|切歌|换一首|next song|next|skip)$",
+         "player.next", lambda m: {}, "正在切换"),
+
         # ── Volume controls ──────────────────────────────
         (r"^(?:音量|声音|volume)\s*(?:设为|设置为|调到|set to)?\s*(\d+)(?:%|百分之)?$",
          "volume.set",

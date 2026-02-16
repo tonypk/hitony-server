@@ -1,5 +1,6 @@
 """Player control tools — pause, resume, stop for music playback."""
 from ..registry import register_tool, ToolResult
+import random
 
 
 @register_tool("player.pause", description="Pause currently playing music", category="player")
@@ -27,3 +28,35 @@ async def player_stop(session=None, **kwargs) -> ToolResult:
         session._music_pause_event.set()
         return ToolResult(type="tts", text="已停止播放")
     return ToolResult(type="tts", text="没有正在播放的音乐")
+
+
+@register_tool("player.next", description="Skip to next song (plays random popular music)", category="player")
+async def player_next(session=None, **kwargs) -> ToolResult:
+    """Skip current song and play next (random popular song)."""
+    import asyncio
+    from ..music import search_and_stream
+    from ...config import settings
+
+    # Stop current music if playing
+    if session and session.music_playing:
+        session.music_abort = True
+        session._music_pause_event.set()
+        # Wait a bit for current stream to stop
+        await asyncio.sleep(0.3)
+
+    # Play a random popular song
+    queries = ["热门歌曲", "流行音乐", "经典老歌", "抖音热歌", "网红歌曲"]
+    query = random.choice(queries)
+
+    try:
+        title, generator = await search_and_stream(query, settings.youtube_api_key or "")
+        return ToolResult(
+            type="music",
+            text=f"为你播放：{title}",
+            data={
+                "title": title,
+                "generator": generator,
+            }
+        )
+    except Exception as e:
+        return ToolResult(type="tts", text=f"切歌失败：{str(e)}")
