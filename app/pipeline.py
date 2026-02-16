@@ -474,8 +474,8 @@ FRAME_MS = 0.060          # 60ms per Opus frame
 PACING_FACTOR = 0.85      # Send at 85% of real-time (slightly faster than playback)
 BATCH_PERIOD = BATCH_SIZE * FRAME_MS * PACING_FACTOR  # ~510ms between paced batches
 
-MUSIC_PRE_BUFFER_BATCHES = 5  # 5 batches × 10 × 60ms = 3s pre-buffer for smooth start
-MUSIC_BATCH_PERIOD = BATCH_SIZE * FRAME_MS * 0.85  # ~510ms — send 15% faster to build margin
+MUSIC_PRE_BUFFER_BATCHES = 2  # 2 batches × 10 × 60ms = 1.2s pre-buffer (matches device queue=24)
+MUSIC_BATCH_PERIOD = BATCH_SIZE * FRAME_MS * 0.80  # ~480ms — send 20% faster to build margin
 
 
 async def _stream_batched(
