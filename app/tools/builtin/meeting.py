@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 
 from ..registry import register_tool, ToolResult, ToolParam
+from ...meeting_notifications import notify_meeting_status
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,11 @@ async def meeting_start(title: str = "", session=None, **kwargs) -> ToolResult:
         logger.error(f"Failed to create meeting DB record: {e}")
 
     logger.info(f"Meeting started: {session.meeting_session_id} - {display_title}")
-    return ToolResult(type="tts", text=f"开始录制{display_title}，每次对话的语音都会被记录。说\"结束会议\"来停止。")
+
+    # 发送录音状态通知到设备
+    await notify_meeting_status(session, "recording", session_id=session.meeting_session_id)
+
+    return ToolResult(type="tts", text=f"开始录制{display_title}，屏幕会显示录音状态。说\"结束会议\"来停止。")
 
 
 @register_tool(
@@ -185,6 +190,10 @@ async def meeting_end(session=None, **kwargs) -> ToolResult:
         session._meeting_audio_buffer = bytearray()
         if session.meeting_db_id:
             await _update_meeting_record(session.meeting_db_id, status="ended", duration_s=0, ended_at=datetime.utcnow())
+
+        # 通知结束
+        await notify_meeting_status(session, "ended")
+
         return ToolResult(type="tts", text="录音时间太短，未保存")
 
     # Save audio to file
@@ -208,9 +217,12 @@ async def meeting_end(session=None, **kwargs) -> ToolResult:
         except Exception as e:
             logger.error(f"Failed to update meeting DB: {e}")
 
+    # 通知结束
+    await notify_meeting_status(session, "ended", duration_s=int(duration_s))
+
     return ToolResult(
         type="tts",
-        text=f"会议录音已结束，共{int(duration_s)}秒。说\"转录\"可以获取文字内容。",
+        text=f"会议录音已结束，共{int(duration_s)}秒。说\"转录\"可以获取转录和总结。",
         data={"meeting_id": meeting_id, "duration_s": duration_s},
     )
 
@@ -241,6 +253,9 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
 
     from ...asr import transcribe_pcm
 
+    # 通知开始转录
+    await notify_meeting_status(session, "transcribing")
+
     # Chunk into 25s segments for Whisper
     chunk_size = 25 * 16000 * 2  # 25s * 16kHz * 2 bytes
     chunks = [bytes(audio_buffer[i:i + chunk_size]) for i in range(0, len(audio_buffer), chunk_size)]
@@ -256,6 +271,7 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
 
     transcript = " ".join(full_text)
     if not transcript:
+        await notify_meeting_status(session, "completed", success=False)
         return ToolResult(type="tts", text="录音转写为空，可能没有清晰的语音内容")
 
     # Generate AI summary
@@ -278,36 +294,54 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
 
     # Auto-push to Notion if configured
     notion_pushed = False
+    notion_url = ""
     if session and session.config.notion_token and session.config.notion_database_id:
         try:
             from .notion import push_meeting_to_notion
-            notion_pushed = await push_meeting_to_notion(
+            result = await push_meeting_to_notion(
                 token=session.config.notion_token,
                 database_id=session.config.notion_database_id,
                 title=session.meeting_session_id or "会议",
                 transcript=transcript,
+                summary=summary_text,  # 传递总结
                 duration_s=int(len(audio_buffer) / 2 / 16000),
             )
+            if result:
+                notion_pushed = True
+                notion_url = result.get("url", "")
         except Exception as e:
             logger.error(f"Failed to push meeting to Notion: {e}")
 
-    # Speak the AI summary if available, otherwise first 200 chars
-    if summary_text:
-        # Extract just the key points for voice summary
-        voice_summary = _extract_voice_summary(summary_text)
-        notion_msg = "，已同步到Notion" if notion_pushed else ""
-        logger.info(f"Meeting transcript ({len(transcript)} chars) + summary ({len(summary_text)} chars)")
-        return ToolResult(
-            type="tts",
-            text=f"会议已转录完成。{voice_summary}{notion_msg}",
-            data={"transcript": transcript, "summary": summary_text}
-        )
+    # 通知转录完成 - 改为静默返回
+    await notify_meeting_status(
+        session,
+        "completed",
+        success=True,
+        notion_pushed=notion_pushed,
+        notion_url=notion_url,
+        transcript_length=len(transcript),
+        has_summary=bool(summary_text)
+    )
+
+    # 改为静默返回，只给简短通知
+    if notion_pushed:
+        notification_text = "会议已转录完成并保存到Notion"
     else:
-        # Fallback: speak first 200 chars
-        brief = transcript[:200] + ("..." if len(transcript) > 200 else "")
-        notion_msg = "，已同步到Notion" if notion_pushed else ""
-        logger.info(f"Meeting transcript ({len(transcript)} chars): {transcript[:100]}...")
-        return ToolResult(type="tts", text=f"会议内容：{brief}{notion_msg}", data={"transcript": transcript})
+        notification_text = "会议已转录完成"
+
+    logger.info(f"Meeting transcript ({len(transcript)} chars) + summary ({len(summary_text)} chars)")
+
+    # 返回类型改为 "silent"，不播报
+    return ToolResult(
+        type="silent",  # 原来是 "tts"
+        text=notification_text,
+        data={
+            "transcript": transcript,
+            "summary": summary_text,
+            "notion_pushed": notion_pushed,
+            "notion_url": notion_url
+        }
+    )
 
 
 def _extract_voice_summary(summary_text: str) -> str:

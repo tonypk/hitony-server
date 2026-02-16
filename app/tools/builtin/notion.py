@@ -109,33 +109,45 @@ async def note_save(content: str, session=None, **kwargs) -> ToolResult:
 
 async def push_meeting_to_notion(token: str, database_id: str,
                                   title: str, transcript: str,
+                                  summary: str = "",  # 新增参数
                                   duration_s: int = 0,
-                                  started_at: datetime = None) -> bool:
+                                  started_at: datetime = None) -> dict:
     """Push a meeting transcript to Notion. Called from meeting.transcribe.
 
-    Returns True on success, False on failure (non-blocking).
+    Returns dict with success status and URL on success, empty dict on failure (non-blocking).
     """
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    page_title = f"{title} — {now_str}"
+    page_title = f"会议记录 — {title}"
 
     # Build content with metadata header
-    meta_lines = [f"会议标题: {title}"]
+    meta_lines = [f"**会议ID**: {title}"]
     if started_at:
-        meta_lines.append(f"开始时间: {started_at.strftime('%Y-%m-%d %H:%M')}")
+        meta_lines.append(f"**开始时间**: {started_at.strftime('%Y-%m-%d %H:%M')}")
     if duration_s > 0:
         mins = duration_s // 60
         secs = duration_s % 60
-        meta_lines.append(f"时长: {mins}分{secs}秒")
+        meta_lines.append(f"**时长**: {mins}分{secs}秒")
     meta_lines.append("")
-    meta_lines.append("---")
+
+    # 如果有总结，优先显示总结
+    if summary:
+        meta_lines.append("## 🤖 AI 总结")
+        meta_lines.append("")
+        meta_lines.append(summary)
+        meta_lines.append("")
+        meta_lines.append("---")
+        meta_lines.append("")
+
+    meta_lines.append("## 📝 完整转录")
     meta_lines.append("")
 
     full_content = "\n".join(meta_lines) + transcript
 
     try:
-        await create_page(token, database_id, page_title, full_content)
-        logger.info(f"Notion: meeting '{title}' pushed ({len(transcript)} chars)")
-        return True
+        result = await create_page(token, database_id, page_title, full_content)
+        page_url = result.get("url", "") if result else ""
+        logger.info(f"Notion: meeting '{title}' pushed ({len(transcript)} chars, summary={bool(summary)})")
+        return {"success": True, "url": page_url}
     except Exception as e:
         logger.error(f"Notion: failed to push meeting '{title}': {e}")
-        return False
+        return {}
