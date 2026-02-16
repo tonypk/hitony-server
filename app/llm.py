@@ -58,6 +58,11 @@ Search rules:
 - Use for questions needing real-time or factual data you don't know
 - Triggers: 搜索/搜一下/查一下/search
 
+Note rules:
+- Save a voice note to Notion → use "note.save" with content
+- Triggers: 记一下/记录一下/笔记/帮我记/备忘/note
+- Extract the actual note content (strip the trigger phrase)
+
 Conversation rules:
 - Clear/reset conversation → use "conversation.reset"
 - Triggers: 清空对话/忘掉对话/新对话/重新开始/clear chat
@@ -73,6 +78,7 @@ Examples:
 - "今天天气怎么样" → {{"tool": "weather.query", "args": {{"query": "今天天气"}}, "reply_hint": "正在查询天气", "emotion": "thinking"}}
 - "倒计时5分钟" → {{"tool": "timer.set", "args": {{"seconds": "300", "label": "5分钟倒计时"}}, "reply_hint": "5分钟倒计时已开始", "emotion": "happy"}}
 - "搜一下最新的iPhone价格" → {{"tool": "web.search", "args": {{"query": "最新iPhone价格"}}, "reply_hint": "正在搜索", "emotion": "thinking"}}
+- "记一下明天要给客户发报价单" → {{"tool": "note.save", "args": {{"content": "明天要给客户发报价单"}}, "reply_hint": "正在记录", "emotion": "happy"}}
 - "你好" → {{"tool": "chat", "args": {{"response": "你好！有什么可以帮你的吗？"}}, "emotion": "happy"}}
 - "我今天好累" → {{"tool": "chat", "args": {{"response": "辛苦了，要不要听首轻松的歌放松一下？"}}, "emotion": "sad"}}
 - "你真棒" → {{"tool": "chat", "args": {{"response": "谢谢夸奖！"}}, "emotion": "love"}}
