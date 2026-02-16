@@ -144,6 +144,23 @@ def _build_rules():
         # ── Timer cancel ────────────────────────────────
         (r"^(?:取消倒计时|停止倒计时|取消计时|cancel\s+timer)$",
          "timer.cancel", lambda m: {}, "已取消倒计时"),
+
+        # ── Alarm management ─────────────────────────────
+        (r"^(?:设置闹钟|设个闹钟|定个闹钟|set\s+alarm)(?:在)?(?:早上|上午|下午|晚上)?(\d{1,2})(?:点|:)(\d{0,2})(?:分)?",
+         "alarm.set",
+         lambda m: {
+             "time": f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}",
+             "label": "闹钟"
+         },
+         "闹钟已设置"),
+
+        (r"^(?:查看闹钟|我的闹钟|有哪些闹钟|闹钟列表|list\s+alarms?)$",
+         "alarm.list", lambda m: {}, "查询闹钟中"),
+
+        (r"^(?:取消闹钟|删除闹钟|关闭闹钟|cancel\s+alarms?)\s*(.*)$",
+         "alarm.cancel",
+         lambda m: {"query": _strip_punctuation(m.group(1).strip()) or "all"},
+         "取消闹钟"),
     ]
 
     _RULES.clear()

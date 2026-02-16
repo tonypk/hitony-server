@@ -65,6 +65,12 @@ Note rules:
 - Triggers: 记一下/记录一下/笔记/帮我记/备忘/note
 - Extract the actual note content (strip the trigger phrase)
 
+Alarm rules:
+- Set daily alarm → use "alarm.set" with time in HH:MM format (24-hour)
+- List alarms → "alarm.list", Cancel alarms → "alarm.cancel"
+- Triggers: 设置闹钟/定闹钟/早上X点叫我/set alarm
+- Alarms repeat daily automatically
+
 Conversation rules:
 - Clear/reset conversation → use "conversation.reset"
 - Triggers: 清空对话/忘掉对话/新对话/重新开始/clear chat
@@ -80,6 +86,7 @@ Examples:
 - "结束会议" → {{"tool": "meeting.end", "args": {{}}, "reply_hint": "录音结束", "emotion": "happy"}}
 - "今天天气怎么样" → {{"tool": "weather.query", "args": {{"query": "今天天气"}}, "reply_hint": "正在查询天气", "emotion": "thinking"}}
 - "倒计时5分钟" → {{"tool": "timer.set", "args": {{"seconds": "300", "label": "5分钟倒计时"}}, "reply_hint": "5分钟倒计时已开始", "emotion": "happy"}}
+- "设置闹钟早上7点" → {{"tool": "alarm.set", "args": {{"time": "07:00", "label": "闹钟", "response": "好的，已设置每天早上7点的闹钟"}}, "reply_hint": "闹钟已设置", "emotion": "happy"}}
 - "搜一下最新的iPhone价格" → {{"tool": "web.search", "args": {{"query": "最新iPhone价格"}}, "reply_hint": "正在搜索", "emotion": "thinking"}}
 - "记一下明天要给客户发报价单" → {{"tool": "note.save", "args": {{"content": "明天要给客户发报价单"}}, "reply_hint": "正在记录", "emotion": "happy"}}
 - "你好" → {{"tool": "chat", "args": {{"response": "你好！有什么可以帮你的吗？"}}, "emotion": "happy"}}

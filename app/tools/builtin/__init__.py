@@ -2,6 +2,7 @@
 from . import youtube
 from . import player
 from . import reminder
+from . import alarm
 from . import meeting
 from . import weather
 from . import timer
