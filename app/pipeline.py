@@ -24,15 +24,18 @@ from .tools import route_intent, execute_tool, get_tool
 logger = logging.getLogger(__name__)
 
 WS_SEND_TIMEOUT = 2.0
+MUSIC_WS_SEND_TIMEOUT = 8.0  # Music batches need longer timeout on slow links
 
 
-async def ws_send_safe(ws: WebSocketServerProtocol, data, session: Session, label: str = "") -> bool:
+async def ws_send_safe(ws: WebSocketServerProtocol, data, session: Session,
+                       label: str = "", timeout: float = 0) -> bool:
     """Send data via WebSocket with timeout. Returns True on success."""
+    t = timeout if timeout > 0 else WS_SEND_TIMEOUT
     try:
-        await asyncio.wait_for(ws.send(data), timeout=WS_SEND_TIMEOUT)
+        await asyncio.wait_for(ws.send(data), timeout=t)
         return True
     except asyncio.TimeoutError:
-        logger.error(f"[{session.session_id}] ws.send() timed out ({WS_SEND_TIMEOUT}s) {label}")
+        logger.error(f"[{session.session_id}] ws.send() timed out ({t}s) {label}")
         return False
     except Exception as e:
         logger.warning(f"[{session.session_id}] ws.send() failed {label}: {type(e).__name__}: {e}")
@@ -388,7 +391,8 @@ async def _stream_music(ws, session, title: str, generator):
                 blob = b''
                 for pkt in batch:
                     blob += struct.pack('>H', len(pkt)) + pkt
-                ok = await ws_send_safe(ws, blob, session, "music_batch")
+                ok = await ws_send_safe(ws, blob, session, "music_batch",
+                                       timeout=MUSIC_WS_SEND_TIMEOUT)
                 if not ok:
                     break
                 sent += len(batch)
@@ -413,7 +417,8 @@ async def _stream_music(ws, session, title: str, generator):
             blob = b''
             for pkt in batch:
                 blob += struct.pack('>H', len(pkt)) + pkt
-            await ws_send_safe(ws, blob, session, "music_batch_final")
+            await ws_send_safe(ws, blob, session, "music_batch_final",
+                               timeout=MUSIC_WS_SEND_TIMEOUT)
             sent += len(batch)
 
     except asyncio.CancelledError:
@@ -469,8 +474,8 @@ FRAME_MS = 0.060          # 60ms per Opus frame
 PACING_FACTOR = 0.85      # Send at 85% of real-time (slightly faster than playback)
 BATCH_PERIOD = BATCH_SIZE * FRAME_MS * PACING_FACTOR  # ~510ms between paced batches
 
-MUSIC_PRE_BUFFER_BATCHES = 3  # Music needs more pre-buffer (generator is real-time)
-MUSIC_BATCH_PERIOD = BATCH_SIZE * FRAME_MS * 0.90  # ~540ms for music
+MUSIC_PRE_BUFFER_BATCHES = 5  # 5 batches × 10 × 60ms = 3s pre-buffer for smooth start
+MUSIC_BATCH_PERIOD = BATCH_SIZE * FRAME_MS * 0.85  # ~510ms — send 15% faster to build margin
 
 
 async def _stream_batched(

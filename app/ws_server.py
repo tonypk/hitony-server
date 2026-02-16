@@ -344,7 +344,7 @@ async def start_websocket_server():
         settings.ws_port,
         ping_interval=None,
         ping_timeout=None,
-        write_limit=4096,
+        write_limit=65536,   # 64KB — avoids WS backpressure during music streaming
         max_queue=64,
     ):
         logger.info(f"WebSocket server listening on ws://{settings.ws_host}:{settings.ws_port}/ws")

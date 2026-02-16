@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 FRAME_SAMPLES = 960       # 60ms @ 16kHz
 FRAME_BYTES = FRAME_SAMPLES * 2  # 960 samples * 2 bytes (int16)
-READ_CHUNK = FRAME_BYTES * 4     # Read ~240ms at a time
+READ_CHUNK = FRAME_BYTES * 8     # Read ~480ms at a time (smoother pipe reads)
 
 YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/search"
 
