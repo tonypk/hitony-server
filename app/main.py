@@ -412,9 +412,9 @@ _ADMIN_HTML = """<!doctype html>
       <label>Integration Token</label>
       <input id="s-notion-token" type="password" placeholder="ntn_..."/>
       <p class="text-sm" id="s-notion-token-status"></p>
-      <label>Database ID <a href="https://developers.notion.com/docs/working-with-databases#adding-pages-to-a-database" target="_blank" style="font-size:0.8em">(how to find)</a></label>
-      <input id="s-notion-dbid" placeholder="abc123def456..."/>
-      <p class="text-sm" style="color:#666">Open your Notion database &rarr; copy the ID from the URL (32 hex chars after workspace name).</p>
+      <label>Database ID <span style="color:#999;font-weight:normal">(optional - will auto-create)</span> <a href="https://developers.notion.com/docs/working-with-databases#adding-pages-to-a-database" target="_blank" style="font-size:0.8em">(how to find)</a></label>
+      <input id="s-notion-dbid" placeholder="Leave empty to auto-create 'HiTony Meetings' database"/>
+      <p class="text-sm" style="color:#16a34a">✨ <strong>New!</strong> Leave Database ID empty - we'll automatically create "HiTony Meetings" database on first use and save the ID for you.</p>
       <button class="btn btn-sm mt" style="background:#000;color:#fff" onclick="testNotion()">Test Connection</button>
       <span id="notion-test-result" class="text-sm" style="margin-left:8px"></span>
     </div>
@@ -717,7 +717,12 @@ async function testNotion() {
   const token = document.getElementById('s-notion-token').value.trim();
   const dbid = document.getElementById('s-notion-dbid').value.trim();
   const el = document.getElementById('notion-test-result');
-  if (!token || !dbid) { el.textContent = 'Enter token and database ID first'; el.style.color = '#dc2626'; return; }
+  if (!token) { el.textContent = 'Enter Notion token first'; el.style.color = '#dc2626'; return; }
+  if (!dbid) {
+    el.textContent = '✅ Token OK. Database will be auto-created on first use.';
+    el.style.color = '#16a34a';
+    return;
+  }
   el.textContent = 'Testing...'; el.style.color = '#666';
   try {
     const res = await api('/api/settings/notion-test', 'POST', {token, database_id: dbid});
