@@ -292,23 +292,29 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
         except Exception as e:
             logger.error(f"Failed to save transcript to DB: {e}")
 
-    # Auto-push to Notion if configured
+    # Auto-push to Notion if configured (auto-creates database if needed)
     notion_pushed = False
     notion_url = ""
-    if session and session.config.notion_token and session.config.notion_database_id:
+    if session and session.config.notion_token:
         try:
-            from .notion import push_meeting_to_notion
-            result = await push_meeting_to_notion(
-                token=session.config.notion_token,
-                database_id=session.config.notion_database_id,
-                title=session.meeting_session_id or "会议",
-                transcript=transcript,
-                summary=summary_text,  # 传递总结
-                duration_s=int(len(audio_buffer) / 2 / 16000),
-            )
-            if result:
-                notion_pushed = True
-                notion_url = result.get("url", "")
+            from .notion import push_meeting_to_notion, _get_or_create_database
+
+            # Get or create default database
+            token, database_id = await _get_or_create_database(session)
+            if token and database_id:
+                result = await push_meeting_to_notion(
+                    token=token,
+                    database_id=database_id,
+                    title=session.meeting_session_id or "会议",
+                    transcript=transcript,
+                    summary=summary_text,  # 传递总结
+                    duration_s=int(len(audio_buffer) / 2 / 16000),
+                )
+                if result:
+                    notion_pushed = True
+                    notion_url = result.get("url", "")
+            else:
+                logger.warning("Notion token configured but failed to get/create database")
         except Exception as e:
             logger.error(f"Failed to push meeting to Notion: {e}")
 

@@ -57,6 +57,37 @@ async def create_page(token: str, database_id: str, title: str, content: str,
     return result
 
 
+async def create_database(token: str, title: str = "HiTony Meetings") -> dict:
+    """Create a new Notion database in the user's workspace.
+
+    Returns the created database object with 'id' field.
+    Raises HTTPStatusError if creation fails (e.g., no workspace permission).
+    """
+    body = {
+        "parent": {"type": "workspace", "workspace": True},
+        "title": [{"type": "text", "text": {"content": title}}],
+        "properties": {
+            "Name": {"title": {}},  # Title property (required)
+            "Date": {"date": {}},   # Meeting date
+            "Duration": {"rich_text": {}},  # Meeting duration
+            "Status": {  # Meeting status
+                "select": {
+                    "options": [
+                        {"name": "录音中", "color": "red"},
+                        {"name": "已结束", "color": "yellow"},
+                        {"name": "已转录", "color": "green"},
+                    ]
+                }
+            },
+        },
+        "is_inline": False,  # Create as full-page database
+    }
+
+    result = await _notion_request("POST", "/databases", token, body)
+    logger.info(f"Notion: created database '{title}' with id {result.get('id', '')[:8]}...")
+    return result
+
+
 async def test_connection(token: str, database_id: str) -> dict:
     """Test Notion connection by querying the database. Returns db info or raises."""
     result = await _notion_request("GET", f"/databases/{database_id}", token)
@@ -64,6 +95,54 @@ async def test_connection(token: str, database_id: str) -> dict:
     if result.get("title"):
         db_title = result["title"][0].get("plain_text", "") if result["title"] else ""
     return {"ok": True, "database_title": db_title}
+
+
+async def ensure_default_database(token: str, user_id: int = None) -> str:
+    """Ensure default HiTony Meetings database exists. Creates if missing.
+
+    Returns database_id (either existing or newly created).
+    Raises exception if database creation fails.
+
+    If user_id is provided, updates the user's settings with the new database_id.
+    """
+    # Try to create the database (will fail if workspace permission is missing)
+    try:
+        db = await create_database(token, "HiTony Meetings")
+        database_id = db.get("id", "")
+
+        if not database_id:
+            raise ValueError("Failed to get database ID from Notion response")
+
+        # Update user settings if user_id is provided
+        if user_id:
+            await _update_user_database_id(user_id, database_id)
+
+        logger.info(f"Notion: ensured default database for user {user_id}, id={database_id[:8]}...")
+        return database_id
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 403:
+            logger.error("Notion: workspace permission required to create database")
+            raise ValueError("需要授予Workspace访问权限才能自动创建数据库")
+        raise
+
+
+async def _update_user_database_id(user_id: int, database_id: str):
+    """Update user's notion_database_id in the database."""
+    from ...database import async_session_factory
+    from ...models import UserSettings
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+        settings = result.scalar_one_or_none()
+
+        if settings:
+            settings.notion_database_id = database_id
+            await db.commit()
+            logger.info(f"Updated user {user_id} notion_database_id to {database_id[:8]}...")
+        else:
+            logger.warning(f"No settings found for user {user_id}, cannot update database_id")
 
 
 def _get_notion_config(session):
@@ -77,6 +156,34 @@ def _get_notion_config(session):
     return token, db_id
 
 
+async def _get_or_create_database(session) -> tuple:
+    """Get Notion config, creating default database if needed.
+
+    Returns (token, database_id) or (None, None) if token is missing.
+    """
+    if not session or not session.config:
+        return None, None
+
+    token = session.config.notion_token
+    if not token:
+        return None, None
+
+    db_id = session.config.notion_database_id
+
+    # If no database_id, try to create default database
+    if not db_id:
+        try:
+            user_id = session.config.user_id if hasattr(session.config, 'user_id') else None
+            db_id = await ensure_default_database(token, user_id)
+            # Update session config with new database_id
+            session.config.notion_database_id = db_id
+        except Exception as e:
+            logger.error(f"Failed to create default Notion database: {e}")
+            return None, None
+
+    return token, db_id
+
+
 @register_tool(
     "note.save",
     description="Save a voice note to Notion",
@@ -85,9 +192,12 @@ def _get_notion_config(session):
     category="notion",
 )
 async def note_save(content: str, session=None, **kwargs) -> ToolResult:
-    token, db_id = _get_notion_config(session)
+    # Use auto-create logic
+    token, db_id = await _get_or_create_database(session)
     if not token:
-        return ToolResult(type="tts", text="Notion未配置，请在管理面板设置Notion Token和数据库ID")
+        return ToolResult(type="tts", text="Notion未配置，请在管理面板设置Notion Token")
+    if not db_id:
+        return ToolResult(type="tts", text="无法创建Notion数据库，请确认已授予Workspace权限")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     title = f"语音笔记 {now}"
