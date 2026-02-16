@@ -35,6 +35,11 @@ class UserConfig:
         val = getattr(self, field_name, "")
         return val if val else fallback
 
+    @property
+    def is_pro_mode(self) -> bool:
+        """Check if user is using Pro mode (custom OpenAI-compatible API)."""
+        return bool(self.openai_base_url and self.openai_api_key)
+
 
 class Session:
     """Per-connection session state, extracted from ws_server.ConnState."""

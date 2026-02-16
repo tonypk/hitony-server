@@ -75,6 +75,71 @@ async def _update_meeting_record(db_id: int, **kwargs):
         logger.info(f"Meeting DB updated: id={db_id}, fields={list(kwargs.keys())}")
 
 
+async def _generate_meeting_summary(transcript: str, session) -> str:
+    """Generate AI summary of meeting transcript using LLM (Pro mode compatible)."""
+    from openai import AsyncOpenAI
+    from ...config import settings
+
+    # Use user's OpenAI config if available (Pro mode)
+    if session and session.config.openai_base_url and session.config.openai_api_key:
+        client = AsyncOpenAI(
+            api_key=session.config.openai_api_key,
+            base_url=session.config.openai_base_url,
+        )
+        model = session.config.openai_chat_model or "gpt-4"
+        logger.info(f"Using Pro mode LLM: {session.config.openai_base_url}")
+    else:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        model = settings.openai_chat_model or "gpt-4-turbo"
+        logger.info(f"Using default LLM: {model}")
+
+    prompt = f"""请总结以下会议内容，提取关键信息：
+
+# 会议转录
+{transcript}
+
+# 输出格式
+请按以下格式输出：
+
+## 会议主题
+[简短描述会议主题]
+
+## 关键要点
+- [要点1]
+- [要点2]
+- [要点3]
+
+## 决策事项
+- [决策1]
+- [决策2]
+
+## 行动项
+- [行动1] - [负责人/时间]
+- [行动2] - [负责人/时间]
+
+注意：
+- 使用简洁的中文
+- 如果某个部分没有内容，可以省略
+- 突出重点，避免冗长
+"""
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个专业的会议记录助手，擅长提炼会议要点。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=1000,
+        )
+        summary = response.choices[0].message.content.strip()
+        return summary
+    except Exception as e:
+        logger.error(f"LLM summary failed: {e}")
+        return ""
+
+
 @register_tool(
     "meeting.start",
     description="Start recording a meeting",
@@ -193,10 +258,21 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
     if not transcript:
         return ToolResult(type="tts", text="录音转写为空，可能没有清晰的语音内容")
 
-    # Save transcript to DB
+    # Generate AI summary
+    summary_text = ""
+    if len(transcript) > 100:  # Only summarize if transcript is substantial
+        try:
+            summary_text = await _generate_meeting_summary(transcript, session)
+            logger.info(f"Meeting summary generated: {len(summary_text)} chars")
+        except Exception as e:
+            logger.error(f"Failed to generate meeting summary: {e}")
+
+    # Save transcript + summary to DB
     if session.meeting_db_id:
         try:
-            await _update_meeting_record(session.meeting_db_id, transcript=transcript, status="transcribed")
+            # Store summary in a custom field (or append to transcript)
+            full_content = f"{transcript}\n\n--- 会议总结 ---\n{summary_text}" if summary_text else transcript
+            await _update_meeting_record(session.meeting_db_id, transcript=full_content, status="transcribed")
         except Exception as e:
             logger.error(f"Failed to save transcript to DB: {e}")
 
@@ -215,8 +291,45 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
         except Exception as e:
             logger.error(f"Failed to push meeting to Notion: {e}")
 
-    # Speak a summary (first 200 chars), full transcript in data
-    summary = transcript[:200] + ("..." if len(transcript) > 200 else "")
-    notion_msg = "，已同步到Notion" if notion_pushed else ""
-    logger.info(f"Meeting transcript ({len(transcript)} chars): {transcript[:100]}...")
-    return ToolResult(type="tts", text=f"会议内容：{summary}{notion_msg}", data={"transcript": transcript})
+    # Speak the AI summary if available, otherwise first 200 chars
+    if summary_text:
+        # Extract just the key points for voice summary
+        voice_summary = _extract_voice_summary(summary_text)
+        notion_msg = "，已同步到Notion" if notion_pushed else ""
+        logger.info(f"Meeting transcript ({len(transcript)} chars) + summary ({len(summary_text)} chars)")
+        return ToolResult(
+            type="tts",
+            text=f"会议已转录完成。{voice_summary}{notion_msg}",
+            data={"transcript": transcript, "summary": summary_text}
+        )
+    else:
+        # Fallback: speak first 200 chars
+        brief = transcript[:200] + ("..." if len(transcript) > 200 else "")
+        notion_msg = "，已同步到Notion" if notion_pushed else ""
+        logger.info(f"Meeting transcript ({len(transcript)} chars): {transcript[:100]}...")
+        return ToolResult(type="tts", text=f"会议内容：{brief}{notion_msg}", data={"transcript": transcript})
+
+
+def _extract_voice_summary(summary_text: str) -> str:
+    """Extract concise voice-friendly summary from full summary text."""
+    # Try to extract just the key points section
+    lines = summary_text.split('\n')
+    key_points = []
+    in_key_section = False
+
+    for line in lines:
+        line = line.strip()
+        if '关键要点' in line or '主要内容' in line:
+            in_key_section = True
+            continue
+        if in_key_section and line.startswith('-'):
+            key_points.append(line[1:].strip())
+        elif in_key_section and line.startswith('##'):
+            break  # Next section
+
+    if key_points:
+        points_text = "、".join(key_points[:3])  # Max 3 points
+        return f"主要内容包括：{points_text}。"
+    else:
+        # Fallback: just say it's summarized
+        return "已生成会议总结。"
