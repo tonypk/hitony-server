@@ -10,3 +10,4 @@ from . import search
 from . import notion
 from . import conversation
 from . import volume
+from . import briefing

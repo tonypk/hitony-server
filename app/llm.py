@@ -71,6 +71,10 @@ Alarm rules:
 - Triggers: 设置闹钟/定闹钟/早上X点叫我/set alarm
 - Alarms repeat daily automatically
 
+Briefing rules:
+- Daily briefing → use "briefing.daily" to summarize weather, reminders, and alarms
+- Triggers: 今天有什么安排/今天的安排/每日简报/daily briefing
+
 Conversation rules:
 - Clear/reset conversation → use "conversation.reset"
 - Triggers: 清空对话/忘掉对话/新对话/重新开始/clear chat
@@ -85,6 +89,7 @@ Examples:
 - "开始会议" → {{"tool": "meeting.start", "args": {{}}, "reply_hint": "开始录音", "emotion": "neutral"}}
 - "结束会议" → {{"tool": "meeting.end", "args": {{}}, "reply_hint": "录音结束", "emotion": "happy"}}
 - "今天天气怎么样" → {{"tool": "weather.query", "args": {{"query": "今天天气"}}, "reply_hint": "正在查询天气", "emotion": "thinking"}}
+- "今天有什么安排" → {{"tool": "briefing.daily", "args": {{}}, "reply_hint": "正在查询", "emotion": "happy"}}
 - "倒计时5分钟" → {{"tool": "timer.set", "args": {{"seconds": "300", "label": "5分钟倒计时"}}, "reply_hint": "5分钟倒计时已开始", "emotion": "happy"}}
 - "设置闹钟早上7点" → {{"tool": "alarm.set", "args": {{"time": "07:00", "label": "闹钟", "response": "好的，已设置每天早上7点的闹钟"}}, "reply_hint": "闹钟已设置", "emotion": "happy"}}
 - "搜一下最新的iPhone价格" → {{"tool": "web.search", "args": {{"query": "最新iPhone价格"}}, "reply_hint": "正在搜索", "emotion": "thinking"}}

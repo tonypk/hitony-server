@@ -104,6 +104,10 @@ def _build_rules():
          lambda m: {"query": m.group(0)},
          "Checking weather"),
 
+        # ── Daily briefing ───────────────────────────────
+        (r"^(?:今天有什么安排|今天的安排|每日简报|日程|今日简报|daily briefing|what'?s (?:on )?today)$",
+         "briefing.daily", lambda m: {}, "正在查询"),
+
         # ── Meeting ──────────────────────────────────────
         (r"^(?:开始(?:会议|录音|记录)|start\s+(?:meeting|recording))(?:\s+(.+))?$",
          "meeting.start",
