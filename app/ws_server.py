@@ -155,8 +155,15 @@ async def handle_text_message(ws: WebSocketServerProtocol, session: Session, tex
 def _launch_pipeline(ws: WebSocketServerProtocol, session: Session):
     """Launch the ASR→LLM→TTS pipeline as a background task."""
     if session.processing:
-        logger.warning(f"[{session.session_id}] Already processing, ignoring new request")
-        return
+        if session.music_playing and session.music_paused:
+            # Music was paused for voice interaction — stop it so new pipeline can run
+            logger.info(f"[{session.session_id}] Stopping paused music to process new request")
+            session.music_abort = True
+            session._music_pause_event.set()  # Unblock music task so it can exit
+            session.processing = False
+        else:
+            logger.warning(f"[{session.session_id}] Already processing, ignoring new request")
+            return
 
     if session._process_task and not session._process_task.done():
         logger.warning(f"[{session.session_id}] Cancelling previous pipeline task")
@@ -167,15 +174,19 @@ def _launch_pipeline(ws: WebSocketServerProtocol, session: Session):
 
 async def _pipeline_wrapper(ws: WebSocketServerProtocol, session: Session):
     """Wrapper to catch unhandled exceptions from the pipeline."""
+    my_task = asyncio.current_task()
     try:
         await run_pipeline(ws, session)
     except asyncio.CancelledError:
         logger.info(f"[{session.session_id}] Pipeline cancelled")
-        session.processing = False
+        # Only clear processing if we're still the active pipeline (avoid clobbering new task)
+        if session._process_task is my_task:
+            session.processing = False
     except Exception as e:
         logger.error(f"[{session.session_id}] UNHANDLED in pipeline: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
-        session.processing = False
+        if session._process_task is my_task:
+            session.processing = False
         try:
             await ws_send_safe(ws, json.dumps({"type": "error", "message": f"Internal error: {e}"}), session)
         except Exception:
