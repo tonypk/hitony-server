@@ -60,9 +60,12 @@ class Settings(BaseModel):
 
 settings = Settings()
 
-# Validate SECRET_KEY is not the weak default
+# Validate SECRET_KEY is not the weak default — refuse to start with insecure key
 if settings.secret_key == "change-me-in-production-please" or len(settings.secret_key) < 16:
-    logger.warning("SECRET_KEY is weak or default! Set a strong SECRET_KEY (>=32 chars) in .env for production.")
+    raise SystemExit(
+        "FATAL: SECRET_KEY is weak or default! "
+        "Set a strong SECRET_KEY (>=16 chars) in .env before starting the server."
+    )
 
 # Log config for debugging
 _oai_key = '***' + settings.openai_api_key[-4:] if len(settings.openai_api_key) > 4 else 'EMPTY'
