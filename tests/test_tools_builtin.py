@@ -192,21 +192,23 @@ class TestVolumeUpDown:
 
     @pytest.mark.asyncio
     async def test_volume_up_device_disconnected(self, mock_session):
-        """Volume up should still work even when device not connected."""
+        """Volume up should return error when device not connected."""
         from app.tools.builtin.volume import volume_up
         mock_session.volume = 50
         with patch("app.tools.builtin.volume._send_volume", new_callable=AsyncMock, return_value=False):
             result = await volume_up(session=mock_session)
-        assert mock_session.volume == 60
-        assert result.type == "tts"
+        assert mock_session.volume == 50  # state unchanged on failure
+        assert result.type == "error"
 
     @pytest.mark.asyncio
     async def test_volume_down_device_disconnected(self, mock_session):
+        """Volume down should return error when device not connected."""
         from app.tools.builtin.volume import volume_down
         mock_session.volume = 50
         with patch("app.tools.builtin.volume._send_volume", new_callable=AsyncMock, return_value=False):
             result = await volume_down(session=mock_session)
-        assert mock_session.volume == 40
+        assert mock_session.volume == 50  # state unchanged on failure
+        assert result.type == "error"
 
     @pytest.mark.asyncio
     async def test_volume_set_low(self, mock_session):
@@ -225,10 +227,12 @@ class TestVolumeUpDown:
     @pytest.mark.asyncio
     async def test_volume_set_device_not_connected(self, mock_session):
         from app.tools.builtin.volume import volume_set
+        mock_session.volume = 30
         with patch("app.tools.builtin.volume._send_volume", new_callable=AsyncMock, return_value=False):
             result = await volume_set(level=50, session=mock_session)
         assert result.type == "error"
         assert "not connected" in result.text.lower() or "Device" in result.text
+        assert mock_session.volume == 30  # state unchanged on failure
 
 
 # ──────────────────────────────────────────────────────────

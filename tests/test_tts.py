@@ -61,9 +61,14 @@ class TestGetClient:
 
 
 class TestSynthesizeTts:
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        _tts_cache.clear()
+        yield
+        _tts_cache.clear()
+
     @pytest.mark.asyncio
     async def test_openai_tts_success(self):
-        _tts_cache.clear()
         mock_response = MagicMock()
         mock_response.content = b"\x00" * (2880 * 2)
         mock_client = AsyncMock()
@@ -76,7 +81,6 @@ class TestSynthesizeTts:
 
     @pytest.mark.asyncio
     async def test_cache_hit(self):
-        _tts_cache.clear()
         cached_packets = [b"\x00" * 20, b"\x00" * 20]
         cache_key = ("好的", "tts-1", "alloy")
         _tts_cache[cache_key] = cached_packets
@@ -85,7 +89,6 @@ class TestSynthesizeTts:
 
     @pytest.mark.asyncio
     async def test_short_text_cached(self):
-        _tts_cache.clear()
         mock_response = MagicMock()
         mock_response.content = b"\x00" * (2880 * 2)
         mock_client = AsyncMock()
@@ -97,7 +100,6 @@ class TestSynthesizeTts:
 
     @pytest.mark.asyncio
     async def test_pro_mode_fallback(self):
-        _tts_cache.clear()
         session = MagicMock()
         session.config.openai_api_key = "sk-custom"
         session.config.openai_base_url = "https://custom.api"

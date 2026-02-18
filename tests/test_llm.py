@@ -102,10 +102,13 @@ class TestMigrateOldFormat:
 
 
 class TestPlanIntent:
+    def setup_method(self):
+        """Clear conversation state before each test."""
+        _conversations.clear()
+
     @pytest.mark.asyncio
     async def test_plan_intent_chat(self):
         """plan_intent should parse LLM JSON response."""
-        _conversations.clear()
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -129,7 +132,6 @@ class TestPlanIntent:
     @pytest.mark.asyncio
     async def test_plan_intent_tool(self):
         """plan_intent should handle tool calls."""
-        _conversations.clear()
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -153,7 +155,6 @@ class TestPlanIntent:
     @pytest.mark.asyncio
     async def test_plan_intent_invalid_json(self):
         """Invalid JSON from LLM should fallback to chat."""
-        _conversations.clear()
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]

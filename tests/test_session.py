@@ -1,5 +1,6 @@
 """Tests for app/session.py — UserConfig and Session state."""
-import time
+from unittest.mock import patch
+
 from app.session import UserConfig, Session
 
 
@@ -51,17 +52,23 @@ class TestSession:
         assert s.meeting_active is False
 
     def test_touch_updates_time(self):
-        s = Session("dev-001")
-        old_time = s.last_activity_time
-        time.sleep(0.01)
-        s.touch()
-        assert s.last_activity_time > old_time
+        clock = [100.0]
+        with patch("app.session.time") as mock_time:
+            mock_time.monotonic = lambda: clock[0]
+            s = Session("dev-001")
+            assert s.last_activity_time == 100.0
+            clock[0] = 101.5
+            s.touch()
+            assert s.last_activity_time == 101.5
 
     def test_idle_seconds(self):
-        s = Session("dev-001")
-        time.sleep(0.05)
-        idle = s.idle_seconds()
-        assert idle >= 0.04
+        clock = [200.0]
+        with patch("app.session.time") as mock_time:
+            mock_time.monotonic = lambda: clock[0]
+            s = Session("dev-001")
+            clock[0] = 203.5
+            idle = s.idle_seconds()
+            assert idle == 3.5
 
     def test_default_config(self):
         s = Session("dev-001")

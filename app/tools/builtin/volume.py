@@ -30,10 +30,11 @@ async def volume_set(level: int, session=None, **kwargs) -> ToolResult:
         return ToolResult(type="error", text="No active session")
 
     level = max(0, min(100, level))
-    session.volume = level
 
     if not await _send_volume(session, level):
         return ToolResult(type="error", text="Device not connected")
+
+    session.volume = level
 
     if level == 0:
         return ToolResult(type="tts", text="已静音")
@@ -57,11 +58,11 @@ async def volume_up(session=None, **kwargs) -> ToolResult:
 
     current = getattr(session, 'volume', 60)
     new_level = min(100, current + 10)
-    session.volume = new_level
 
     if not await _send_volume(session, new_level):
-        return ToolResult(type="tts", text=f"音量调到{new_level}%")
+        return ToolResult(type="error", text="Device not connected")
 
+    session.volume = new_level
     return ToolResult(type="tts", text=f"音量调到{new_level}%")
 
 
@@ -77,9 +78,9 @@ async def volume_down(session=None, **kwargs) -> ToolResult:
 
     current = getattr(session, 'volume', 60)
     new_level = max(0, current - 10)
-    session.volume = new_level
 
     if not await _send_volume(session, new_level):
-        return ToolResult(type="tts", text=f"音量调到{new_level}%")
+        return ToolResult(type="error", text="Device not connected")
 
+    session.volume = new_level
     return ToolResult(type="tts", text=f"音量调到{new_level}%")
