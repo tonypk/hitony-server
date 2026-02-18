@@ -2,6 +2,8 @@ import asyncio
 import logging
 import struct
 from typing import Optional
+from collections import OrderedDict
+import numpy as np
 import opuslib
 from openai import AsyncOpenAI
 from .config import settings
@@ -9,49 +11,50 @@ from .session import Session
 
 logger = logging.getLogger(__name__)
 
+# LRU cache for short TTS phrases (max 50 entries)
+_tts_cache: OrderedDict[tuple, list] = OrderedDict()
+_TTS_CACHE_MAX = 50
+_TTS_CACHE_MAX_CHARS = 20  # Only cache phrases <= 20 chars
+
 _client = AsyncOpenAI(
     api_key=settings.openai_api_key,
     base_url=settings.openai_base_url,
 )
 
+# Per-user client cache: (base_url, api_key) → AsyncOpenAI
+_client_cache: dict[tuple[str, str], AsyncOpenAI] = {}
+
 
 def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
-    """Return per-user client if session has custom API key, else global."""
+    """Return cached per-user client if session has custom API key, else global."""
     if session and session.config.openai_api_key:
-        return AsyncOpenAI(
-            api_key=session.config.openai_api_key,
-            base_url=session.config.get("openai_base_url", settings.openai_base_url),
-        )
+        base_url = session.config.get("openai_base_url", settings.openai_base_url)
+        key = (base_url, session.config.openai_api_key)
+        if key not in _client_cache:
+            _client_cache[key] = AsyncOpenAI(api_key=session.config.openai_api_key, base_url=base_url)
+        return _client_cache[key]
     return _client
 
 
 def _resample_24k_to_16k(pcm_24k: bytes) -> bytes:
-    """Resample PCM16 from 24kHz to 16kHz using simple linear interpolation.
+    """Resample PCM16 from 24kHz to 16kHz using numpy (fast vectorized interpolation).
     OpenAI TTS pcm format outputs 24kHz 16-bit mono."""
-    samples_24k = struct.unpack(f'<{len(pcm_24k) // 2}h', pcm_24k)
+    samples_24k = np.frombuffer(pcm_24k, dtype=np.int16).astype(np.float32)
     n_in = len(samples_24k)
     n_out = n_in * 2 // 3  # 16000/24000 = 2/3
 
-    samples_16k = []
-    for i in range(n_out):
-        # Map output index to input position
-        pos = i * 3.0 / 2.0
-        idx = int(pos)
-        frac = pos - idx
-        if idx + 1 < n_in:
-            val = samples_24k[idx] * (1.0 - frac) + samples_24k[idx + 1] * frac
-        else:
-            val = samples_24k[idx] if idx < n_in else 0
-        # Clamp to int16 range
-        val = max(-32768, min(32767, int(val)))
-        samples_16k.append(val)
+    x_in = np.arange(n_in)
+    x_out = np.linspace(0, n_in - 1, n_out)
+    samples_16k = np.interp(x_out, x_in, samples_24k)
+    samples_16k = np.clip(samples_16k, -32768, 32767).astype(np.int16)
 
-    return struct.pack(f'<{len(samples_16k)}h', *samples_16k)
+    return samples_16k.tobytes()
 
 
 async def synthesize_tts(text: str, session: Optional[Session] = None) -> list:
     """Synthesize TTS using configured provider and return list of Opus packets.
     Supports 'openai' (default) and 'edge' (free, no API key needed).
+    Short phrases (<=20 chars) are cached to avoid redundant API calls.
     """
     # Check TTS provider
     tts_provider = ""
@@ -69,6 +72,14 @@ async def synthesize_tts(text: str, session: Optional[Session] = None) -> list:
                  if session else settings.openai_tts_model)
     tts_voice = (session.config.get("openai_tts_voice", settings.openai_tts_voice)
                  if session else settings.openai_tts_voice)
+
+    # Check LRU cache for short phrases
+    if len(text) <= _TTS_CACHE_MAX_CHARS:
+        cache_key = (text, tts_model, tts_voice)
+        if cache_key in _tts_cache:
+            _tts_cache.move_to_end(cache_key)
+            logger.info(f"TTS cache hit: '{text}' ({len(_tts_cache[cache_key])} packets)")
+            return _tts_cache[cache_key]
 
     logger.info(f"TTS: synthesizing '{text[:50]}...' with {tts_model}/{tts_voice}")
 
@@ -102,6 +113,15 @@ async def synthesize_tts(text: str, session: Optional[Session] = None) -> list:
     opus_packets = await loop.run_in_executor(None, _resample_and_encode, pcm_24k)
 
     logger.info(f"TTS: encoded {len(opus_packets)} Opus packets, sizes: {[len(p) for p in opus_packets[:5]]}")
+
+    # Cache short phrases for future reuse
+    if len(text) <= _TTS_CACHE_MAX_CHARS:
+        cache_key = (text, tts_model, tts_voice)
+        _tts_cache[cache_key] = opus_packets
+        if len(_tts_cache) > _TTS_CACHE_MAX:
+            _tts_cache.popitem(last=False)  # Remove oldest entry
+        logger.info(f"TTS cached: '{text}' (cache size: {len(_tts_cache)})")
+
     return opus_packets
 
 

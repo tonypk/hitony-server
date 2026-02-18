@@ -1,5 +1,20 @@
 """Volume control tool."""
+import json
 from ..registry import register_tool, ToolResult, ToolParam
+
+
+async def _send_volume(session, level: int) -> bool:
+    """Send volume command to device via WS. Returns True on success."""
+    from ..ws_server import get_active_connection
+
+    conn = get_active_connection(session.device_id) if hasattr(session, 'device_id') else None
+    if not conn:
+        return False
+
+    ws, _ = conn
+    msg = json.dumps({"type": "volume", "level": level})
+    await ws.send(msg)
+    return True
 
 
 @register_tool(
@@ -14,20 +29,11 @@ async def volume_set(level: int, session=None, **kwargs) -> ToolResult:
     if not session:
         return ToolResult(type="error", text="No active session")
 
-    # Clamp to valid range
     level = max(0, min(100, level))
+    session.volume = level
 
-    # Send volume command via WebSocket
-    import json
-    from ..ws_server import get_active_connection
-
-    conn = get_active_connection(session.device_id) if hasattr(session, 'device_id') else session
-    if not conn:
+    if not await _send_volume(session, level):
         return ToolResult(type="error", text="Device not connected")
-
-    ws, _ = conn
-    msg = json.dumps({"type": "volume", "level": level})
-    await ws.send(msg)
 
     if level == 0:
         return ToolResult(type="tts", text="已静音")
@@ -46,9 +52,17 @@ async def volume_set(level: int, session=None, **kwargs) -> ToolResult:
 )
 async def volume_up(session=None, **kwargs) -> ToolResult:
     """Increase volume by 10%."""
-    # Get current volume from session state (if tracked)
-    # For now, just send a relative command
-    return ToolResult(type="tts", text="音量已增大")
+    if not session:
+        return ToolResult(type="error", text="No active session")
+
+    current = getattr(session, 'volume', 60)
+    new_level = min(100, current + 10)
+    session.volume = new_level
+
+    if not await _send_volume(session, new_level):
+        return ToolResult(type="tts", text=f"音量调到{new_level}%")
+
+    return ToolResult(type="tts", text=f"音量调到{new_level}%")
 
 
 @register_tool(
@@ -58,4 +72,14 @@ async def volume_up(session=None, **kwargs) -> ToolResult:
 )
 async def volume_down(session=None, **kwargs) -> ToolResult:
     """Decrease volume by 10%."""
-    return ToolResult(type="tts", text="音量已减小")
+    if not session:
+        return ToolResult(type="error", text="No active session")
+
+    current = getattr(session, 'volume', 60)
+    new_level = max(0, current - 10)
+    session.volume = new_level
+
+    if not await _send_volume(session, new_level):
+        return ToolResult(type="tts", text=f"音量调到{new_level}%")
+
+    return ToolResult(type="tts", text=f"音量调到{new_level}%")

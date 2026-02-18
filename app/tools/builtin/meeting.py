@@ -262,12 +262,18 @@ async def meeting_transcribe(session=None, **kwargs) -> ToolResult:
 
     logger.info(f"Meeting transcribe: {len(audio_buffer)} bytes -> {len(chunks)} chunks")
 
-    full_text = []
-    for i, chunk in enumerate(chunks):
-        text = await transcribe_pcm(chunk, session=session)
-        if text:
-            full_text.append(text)
-        logger.info(f"Transcribe chunk {i+1}/{len(chunks)}: '{text[:50]}...' " if text else f"Transcribe chunk {i+1}/{len(chunks)}: empty")
+    # 并行转录（最多5个并发），保持顺序
+    import asyncio
+    sem = asyncio.Semaphore(5)
+
+    async def _transcribe_chunk(i: int, chunk: bytes) -> str:
+        async with sem:
+            text = await transcribe_pcm(chunk, session=session)
+            logger.info(f"Transcribe chunk {i+1}/{len(chunks)}: '{text[:50]}...' " if text else f"Transcribe chunk {i+1}/{len(chunks)}: empty")
+            return text or ""
+
+    results = await asyncio.gather(*[_transcribe_chunk(i, c) for i, c in enumerate(chunks)])
+    full_text = [t for t in results if t]
 
     transcript = " ".join(full_text)
     if not transcript:

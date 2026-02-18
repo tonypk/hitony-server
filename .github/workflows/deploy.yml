@@ -14,6 +14,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Pre-deploy checks
+        run: |
+          echo "🔍 Running syntax checks..."
+          python -m py_compile app/main.py
+          python -m py_compile app/ws_server.py
+          python -m py_compile app/pipeline.py
+          python -m py_compile app/asr.py
+          python -m py_compile app/tts.py
+          python -m py_compile app/llm.py
+          python -m py_compile app/config.py
+          echo "✅ All syntax checks passed"
+        working-directory: .
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:

@@ -60,6 +60,10 @@ class Settings(BaseModel):
 
 settings = Settings()
 
+# Validate SECRET_KEY is not the weak default
+if settings.secret_key == "change-me-in-production-please" or len(settings.secret_key) < 16:
+    logger.warning("SECRET_KEY is weak or default! Set a strong SECRET_KEY (>=32 chars) in .env for production.")
+
 # Log config for debugging
 _oai_key = '***' + settings.openai_api_key[-4:] if len(settings.openai_api_key) > 4 else 'EMPTY'
 logger.info(f"Config: ASR/TTS → {settings.openai_base_url} (key={_oai_key})")

@@ -289,8 +289,11 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
             if isinstance(message, str):
                 await handle_text_message(ws, session, message)
             elif isinstance(message, bytes):
-                # Accumulate Opus audio packets
+                # Accumulate Opus audio packets (cap at 500 = ~10s @ 20ms frames)
                 if session.listening:
+                    if len(session.opus_packets) >= 500:
+                        logger.warning(f"[{session.session_id}] Audio buffer cap reached (500 packets), dropping")
+                        continue
                     session.opus_packets.append(bytes(message))
                     session.touch()
     except websockets.exceptions.ConnectionClosed:
@@ -353,8 +356,8 @@ async def start_websocket_server():
         handle_client,
         settings.ws_host,
         settings.ws_port,
-        ping_interval=None,
-        ping_timeout=None,
+        ping_interval=30,   # 30s心跳，检测静默断开的设备
+        ping_timeout=10,    # 10s无pong回应视为断开
         write_limit=65536,   # 64KB — avoids WS backpressure during music streaming
         max_queue=64,
     ):

@@ -139,16 +139,22 @@ def append_assistant_message(device_id: str, text: str):
         _conversations[device_id][:] = _conversations[device_id][-MAX_HISTORY:]
 
 
+# Client cache: (base_url, api_key) → AsyncOpenAI
+_client_cache: dict[tuple[str, str], AsyncOpenAI] = {}
+_default_client = AsyncOpenAI(
+    api_key=settings.openai_api_key,
+    base_url=settings.openai_base_url,
+)
+
+
 def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
     if session and session.config.openai_api_key:
-        return AsyncOpenAI(
-            api_key=session.config.openai_api_key,
-            base_url=session.config.get("openai_base_url", settings.openai_base_url),
-        )
-    return AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
-    )
+        base_url = session.config.get("openai_base_url", settings.openai_base_url)
+        key = (base_url, session.config.openai_api_key)
+        if key not in _client_cache:
+            _client_cache[key] = AsyncOpenAI(api_key=session.config.openai_api_key, base_url=base_url)
+        return _client_cache[key]
+    return _default_client
 
 
 async def plan_intent(text: str, session_id: str, session: Optional[Session] = None) -> dict:
@@ -178,6 +184,7 @@ async def plan_intent(text: str, session_id: str, session: Optional[Session] = N
         model=chat_model,
         messages=messages,
         response_format={"type": "json_object"},
+        max_tokens=512,  # JSON intent不需要更多，防止超长回复
     )
 
     raw = response.choices[0].message.content.strip()

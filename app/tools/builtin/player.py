@@ -35,7 +35,6 @@ async def player_next(session=None, **kwargs) -> ToolResult:
     """Skip current song and play next (random popular song)."""
     import asyncio
     from ..music import search_and_stream
-    from ...config import settings
 
     # Stop current music if playing
     if session and session.music_playing:
@@ -48,8 +47,12 @@ async def player_next(session=None, **kwargs) -> ToolResult:
     queries = ["热门歌曲", "流行音乐", "经典老歌", "抖音热歌", "网红歌曲"]
     query = random.choice(queries)
 
+    youtube_api_key = ""
+    if session and hasattr(session, "config"):
+        youtube_api_key = session.config.youtube_api_key or ""
+
     try:
-        title, generator = await search_and_stream(query, settings.youtube_api_key or "")
+        title, generator = await search_and_stream(query, youtube_api_key=youtube_api_key)
         return ToolResult(
             type="music",
             text=f"为你播放：{title}",

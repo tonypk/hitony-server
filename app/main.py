@@ -110,7 +110,8 @@ async def ota(request: Request):
 
 # ── OTA firmware upload ───────────────────────────────────────
 
-from fastapi import UploadFile, File, Form
+from fastapi import UploadFile, File, Form, Depends
+from .auth import get_current_user
 from pathlib import Path
 
 OTA_DIR = Path(DATA_DIR) / "ota"
@@ -120,11 +121,9 @@ OTA_DIR = Path(DATA_DIR) / "ota"
 async def ota_upload_form(
     file: UploadFile = File(...),
     version: str = Form(...),
+    user = Depends(get_current_user),
 ):
-    """Upload a new firmware binary (multipart form)."""
-    from .auth import get_current_user_from_token
-    # Auth is handled via JS adding Bearer token — but UploadFile endpoints
-    # need special handling. For simplicity, this is admin-only by convention.
+    """Upload a new firmware binary (multipart form). Requires authentication."""
 
     os.makedirs(OTA_DIR, exist_ok=True)
 
@@ -485,6 +484,9 @@ function enterApp() {
   loadStats();
 }
 
+// ── HTML escape helper (XSS prevention) ──
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
 // ── API helper ──
 async function api(path, method='GET', body=null) {
   const opts = { method, headers: {'Authorization': 'Bearer ' + TOKEN} };
@@ -519,10 +521,10 @@ async function loadDevices() {
         : '<span style="color:#999">○ Offline</span>';
       if (online && st.music_playing) badge += ' <span style="color:#ff9800;font-size:0.8em">♪</span>';
       if (online && st.meeting_active) badge += ' <span style="color:#f44336;font-size:0.8em">●REC</span>';
-      const fw = (st && st.fw_version) ? ` <span style="color:#888;font-size:0.8em">v${st.fw_version}</span>` : '';
+      const fw = (st && st.fw_version) ? ` <span style="color:#888;font-size:0.8em">v${esc(st.fw_version)}</span>` : '';
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${d.device_id}${fw}</td><td>${d.name||'-'}</td><td>${badge}</td><td>${seen}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="delDevice('${d.device_id}')">Remove</button></td>`;
+      tr.innerHTML = `<td>${esc(d.device_id)}${fw}</td><td>${esc(d.name||'-')}</td><td>${badge}</td><td>${esc(seen)}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="delDevice('${esc(d.device_id)}')">Remove</button></td>`;
       tbody.appendChild(tr);
     });
   } catch(e) { showMsg('dev-msg', e.message, true); }
@@ -566,7 +568,7 @@ async function loadReminders() {
       const status = r.delivered === 0 ? 'Pending' : r.delivered === 1 ? 'Delivered' : 'Failed';
       const statusCls = r.delivered === 0 ? 'color:#d97706' : r.delivered === 1 ? 'color:#16a34a' : 'color:#dc2626';
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${dt}</td><td>${r.message}</td><td style="${statusCls}">${status}</td>
+      tr.innerHTML = `<td>${esc(dt)}</td><td>${esc(r.message)}</td><td style="${statusCls}">${status}</td>
         <td><button class="btn btn-danger btn-sm" onclick="delReminder(${r.id})">Delete</button></td>`;
       tbody.appendChild(tr);
     });
@@ -599,7 +601,7 @@ async function loadMeetings() {
       const statusCls = m.status==='recording'?'color:#d97706':m.status==='transcribed'?'color:#16a34a':'color:#555';
       const dlBtn = m.status !== 'recording' ? `<button class="btn btn-sm" style="background:#2563eb;color:#fff;margin-right:4px" onclick="downloadMeeting(${m.id})">Download</button>` : '';
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${m.title}</td><td>${dur}</td><td style="${statusCls}">${statusText}</td><td>${dt}</td>
+      tr.innerHTML = `<td>${esc(m.title)}</td><td>${esc(dur)}</td><td style="${statusCls}">${esc(statusText)}</td><td>${esc(dt)}</td>
         <td>${dlBtn}<button class="btn btn-danger btn-sm" onclick="delMeeting(${m.id})">Delete</button></td>`;
       tbody.appendChild(tr);
     });

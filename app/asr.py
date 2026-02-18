@@ -14,14 +14,18 @@ _client = AsyncOpenAI(
     base_url=settings.openai_base_url,
 )
 
+# Per-user client cache: (base_url, api_key) → AsyncOpenAI
+_client_cache: dict[tuple[str, str], AsyncOpenAI] = {}
+
 
 def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
-    """Return per-user client if session has custom API key, else global."""
+    """Return cached per-user client if session has custom API key, else global."""
     if session and session.config.openai_api_key:
-        return AsyncOpenAI(
-            api_key=session.config.openai_api_key,
-            base_url=session.config.get("openai_base_url", settings.openai_base_url),
-        )
+        base_url = session.config.get("openai_base_url", settings.openai_base_url)
+        key = (base_url, session.config.openai_api_key)
+        if key not in _client_cache:
+            _client_cache[key] = AsyncOpenAI(api_key=session.config.openai_api_key, base_url=base_url)
+        return _client_cache[key]
     return _client
 
 def pcm_to_wav(pcm_bytes: bytes) -> bytes:
@@ -68,6 +72,16 @@ _HALLUCINATIONS = {
 }
 
 # Longer hallucination patterns — match as substrings
+_ASR_PROMPT = (
+    "HiTony语音助手。播放音乐，放首歌，来一首，下一首，切歌，"
+    "播放周杰伦的歌，播放Taylor Swift，播放邓紫棋，暂停，停止播放，继续播放，"
+    "音量大一点，音量小一点，声音调到50，提醒我，每天提醒我，每周提醒我，每月提醒我，"
+    "工作日提醒我，每天8点提醒我，查看提醒，取消提醒，设置闹钟，设个闹钟7点，"
+    "查看闹钟，取消闹钟，今天有什么安排，今天的安排，每日简报，今天天气怎么样，"
+    "倒计时，取消倒计时，搜索，帮我查一下，开始会议，结束会议，"
+    "记一下，笔记，帮我记，备忘，清空对话，新对话，忘掉对话，你好。"
+)
+
 _HALLUCINATION_SUBSTRINGS = [
     "点赞", "订阅", "转发", "打赏", "关注",
     "字幕由", "字幕提供", "subtitles by",
@@ -104,7 +118,7 @@ async def transcribe_pcm(pcm_bytes: bytes, session: Optional[Session] = None) ->
             temperature=0,
             language="zh",
             # Whisper prompt: vocabulary hints for common commands
-            prompt="HiTony语音助手。播放音乐，放首歌，来一首，下一首，切歌，播放周杰伦的歌，播放Taylor Swift，播放邓紫棋，暂停，停止播放，继续播放，音量大一点，音量小一点，声音调到50，提醒我，每天提醒我，每周提醒我，每月提醒我，工作日提醒我，每天8点提醒我，查看提醒，取消提醒，设置闹钟，设个闹钟7点，查看闹钟，取消闹钟，今天有什么安排，今天的安排，每日简报，今天天气怎么样，倒计时，取消倒计时，搜索，帮我查一下，开始会议，结束会议，记一下，笔记，帮我记，备忘，清空对话，新对话，忘掉对话，你好。",
+            prompt=_ASR_PROMPT,
         )
     except Exception as e:
         # Fallback to default API if user's OpenClaw doesn't support ASR
@@ -116,7 +130,7 @@ async def transcribe_pcm(pcm_bytes: bytes, session: Optional[Session] = None) ->
                 file=wav_file,
                 temperature=0,
                 language="zh",
-                prompt="HiTony语音助手。播放音乐，放首歌，来一首，下一首，切歌，播放周杰伦的歌，播放Taylor Swift，播放邓紫棋，暂停，停止播放，继续播放，音量大一点，音量小一点，声音调到50，提醒我，每天提醒我，每周提醒我，每月提醒我，工作日提醒我，每天8点提醒我，查看提醒，取消提醒，设置闹钟，设个闹钟7点，查看闹钟，取消闹钟，今天有什么安排，今天的安排，每日简报，今天天气怎么样，倒计时，取消倒计时，搜索，帮我查一下，开始会议，结束会议，记一下，笔记，帮我记，备忘，清空对话，新对话，忘掉对话，你好。",
+                prompt=_ASR_PROMPT,
             )
         else:
             raise  # Re-raise if not in Pro mode
