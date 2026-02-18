@@ -16,7 +16,6 @@ from sqlalchemy import select
 from .config import settings
 from .session import Session, UserConfig
 from .pipeline import run_pipeline, ws_send_safe
-from .registry import registry
 from .llm import reset_conversation, load_conversation, get_conversation
 from .database import async_session_factory
 from .models import Device, UserSettings
@@ -254,20 +253,17 @@ async def handle_client(ws: WebSocketServerProtocol, path: str):
         await ws.close(code=4401, reason="missing credentials")
         return
 
-    # Try DB auth first, fallback to legacy registry
+    # DB auth (bcrypt token hash verification)
     user_config = await _load_user_config(device_id, token)
-    if user_config is None and not registry.is_valid(device_id, token):
+    if user_config is None:
         logger.warning(f"Invalid token for device {device_id}")
         await ws_send_safe(ws, json.dumps({"type": "error", "message": "invalid token"}), Session("unknown"))
         await ws.close(code=4401, reason="invalid token")
         return
 
     session = Session(device_id)
-    if user_config:
-        session.config = user_config
-        logger.info(f"[{session.session_id}] Device {device_id} authenticated via DB (user_id={user_config.user_id})")
-    else:
-        logger.info(f"[{session.session_id}] Device {device_id} authenticated via legacy registry")
+    session.config = user_config
+    logger.info(f"[{session.session_id}] Device {device_id} authenticated (user_id={user_config.user_id})")
 
     # Register active connection for server-push (reminders, etc.)
     _active_connections[device_id] = (ws, session)

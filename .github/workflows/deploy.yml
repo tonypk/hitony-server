@@ -32,6 +32,11 @@ jobs:
           echo "✅ All syntax checks passed"
         working-directory: .
 
+      - name: Run tests
+        run: |
+          pip install -r requirements-dev.txt
+          pytest tests/ --tb=short -q
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:

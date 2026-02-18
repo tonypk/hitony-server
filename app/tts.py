@@ -21,8 +21,9 @@ _client = AsyncOpenAI(
     base_url=settings.openai_base_url,
 )
 
-# Per-user client cache: (base_url, api_key) → AsyncOpenAI
-_client_cache: dict[tuple[str, str], AsyncOpenAI] = {}
+# Per-user client cache with LRU eviction: (base_url, api_key) → AsyncOpenAI
+_CLIENT_CACHE_MAX = 20
+_client_cache: OrderedDict[tuple[str, str], AsyncOpenAI] = OrderedDict()
 
 
 def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
@@ -31,7 +32,10 @@ def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
         base_url = session.config.get("openai_base_url", settings.openai_base_url)
         key = (base_url, session.config.openai_api_key)
         if key not in _client_cache:
+            if len(_client_cache) >= _CLIENT_CACHE_MAX:
+                _client_cache.popitem(last=False)
             _client_cache[key] = AsyncOpenAI(api_key=session.config.openai_api_key, base_url=base_url)
+        _client_cache.move_to_end(key)
         return _client_cache[key]
     return _client
 

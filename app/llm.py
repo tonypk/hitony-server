@@ -1,6 +1,7 @@
 """LLM planner — classifies user intent into tool calls via OpenAI."""
 import json
 import logging
+from collections import OrderedDict
 from datetime import datetime
 from typing import Dict, List, Optional
 from openai import AsyncOpenAI
@@ -139,8 +140,9 @@ def append_assistant_message(device_id: str, text: str):
         _conversations[device_id][:] = _conversations[device_id][-MAX_HISTORY:]
 
 
-# Client cache: (base_url, api_key) → AsyncOpenAI
-_client_cache: dict[tuple[str, str], AsyncOpenAI] = {}
+# Client cache with LRU eviction: (base_url, api_key) → AsyncOpenAI
+_CLIENT_CACHE_MAX = 20
+_client_cache: OrderedDict[tuple[str, str], AsyncOpenAI] = OrderedDict()
 _default_client = AsyncOpenAI(
     api_key=settings.openai_api_key,
     base_url=settings.openai_base_url,
@@ -152,7 +154,10 @@ def _get_client(session: Optional[Session] = None) -> AsyncOpenAI:
         base_url = session.config.get("openai_base_url", settings.openai_base_url)
         key = (base_url, session.config.openai_api_key)
         if key not in _client_cache:
+            if len(_client_cache) >= _CLIENT_CACHE_MAX:
+                _client_cache.popitem(last=False)
             _client_cache[key] = AsyncOpenAI(api_key=session.config.openai_api_key, base_url=base_url)
+        _client_cache.move_to_end(key)
         return _client_cache[key]
     return _default_client
 

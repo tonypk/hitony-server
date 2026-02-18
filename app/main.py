@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .config import settings
-from .registry import registry
 from .api import router as api_router
 
 logging.basicConfig(
@@ -98,8 +97,23 @@ async def register_device(payload: dict):
     token = payload.get("token")
     if not device_id or not token:
         raise HTTPException(status_code=400, detail="device_id and token required")
-    registry.register(device_id, token)
-    logger.info(f"Registered device: {device_id}")
+
+    from .database import async_session_factory
+    from .models import Device
+    from .auth import hash_token
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(Device).where(Device.device_id == device_id))
+        device = result.scalar_one_or_none()
+        if device:
+            device.token_hash = hash_token(token)
+        else:
+            device = Device(device_id=device_id, token_hash=hash_token(token))
+            db.add(device)
+        await db.commit()
+
+    logger.info(f"Registered device: {device_id} (DB)")
     return {"ok": True}
 
 @app.get("/ota/")
