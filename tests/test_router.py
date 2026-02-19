@@ -290,10 +290,32 @@ class TestReminderRouting:
         assert r.tool == "reminder.cancel"
 
 
-class TestNoMatch:
-    def test_greeting(self):
-        assert route("你好") is None
+class TestGreeting:
+    def test_hello_zh(self):
+        r = route("你好")
+        assert r is not None
+        assert r.tool == "chat"
+        assert r.args["response"] == "你好！有什么可以帮你的吗？"
 
+    def test_thanks_zh(self):
+        r = route("谢谢你")
+        assert r is not None
+        assert r.tool == "chat"
+        assert r.args["response"] == "不客气！"
+
+    def test_bye_zh(self):
+        r = route("拜拜")
+        assert r is not None
+        assert r.tool == "chat"
+        assert r.args["response"] == "再见！"
+
+    def test_hello_en(self):
+        r = route("hello")
+        assert r is not None
+        assert r.tool == "chat"
+
+
+class TestNoMatch:
     def test_question(self):
         assert route("今天是什么日子") is None
 

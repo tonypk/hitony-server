@@ -46,6 +46,11 @@ def _build_rules():
          lambda m: {"query": "热门歌曲"},
          "正在播放音乐"),
 
+        (r"^(?:帮我|请)?\s*(?:放点(?:音乐|歌)|来点(?:音乐|歌)|随便放(?:点|首))$",
+         "youtube.play",
+         lambda m: {"query": "热门歌曲"},
+         "正在播放音乐"),
+
         # ── Player controls ──────────────────────────────
         (r"^(?:暂停|暂停播放|pause)$",
          "player.pause", lambda m: {}, "已暂停"),
@@ -56,7 +61,7 @@ def _build_rules():
         (r"^(?:停止|停止播放|停|别放了|别播了|stop)$",
          "player.stop", lambda m: {}, "已停止"),
 
-        (r"^(?:下一首|切歌|换一首|next song|next|skip)$",
+        (r"^(?:下一首|切歌|换一首|换首歌|next song|next|skip)$",
          "player.next", lambda m: {}, "正在切换"),
 
         # ── Volume controls ──────────────────────────────
@@ -70,6 +75,12 @@ def _build_rules():
 
         (r"^(?:音量|声音)?(?:小一?(?:点|些)|减小|降低|调低|quieter|volume down|turn down)$",
          "volume.down", lambda m: {}, "音量已减小"),
+
+        (r"^声音太(?:大|响)了$",
+         "volume.down", lambda m: {}, "音量已减小"),
+
+        (r"^声音太(?:小|轻)了$",
+         "volume.up", lambda m: {}, "音量已增大"),
 
         (r"^(?:静音|mute)$",
          "volume.set",
@@ -150,6 +161,22 @@ def _build_rules():
          "timer.cancel", lambda m: {}, "已取消倒计时"),
 
         # ── Alarm management ─────────────────────────────
+        (r"^(?:早上|上午|下午|晚上)?(\d{1,2})(?:点|:)(\d{0,2})(?:分)?(?:叫我|叫我起床|提醒我起床)$",
+         "alarm.set",
+         lambda m: {
+             "time": f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}",
+             "label": "闹钟"
+         },
+         "闹钟已设置"),
+
+        (r"^定闹钟(?:在)?(?:早上|上午|下午|晚上)?(\d{1,2})(?:点|:)(\d{0,2})(?:分)?$",
+         "alarm.set",
+         lambda m: {
+             "time": f"{int(m.group(1)):02d}:{int(m.group(2) or 0):02d}",
+             "label": "闹钟"
+         },
+         "闹钟已设置"),
+
         (r"^(?:设置闹钟|设个闹钟|定个闹钟|set\s+alarm)(?:在)?(?:早上|上午|下午|晚上)?(\d{1,2})(?:点|:)(\d{0,2})(?:分)?",
          "alarm.set",
          lambda m: {
@@ -165,6 +192,28 @@ def _build_rules():
          "alarm.cancel",
          lambda m: {"query": _strip_punctuation(m.group(1).strip()) or "all"},
          "取消闹钟"),
+
+        # ── Reminder (content only, tool handles time) ──
+        (r"^(?:帮我|请)?提醒我(.+)",
+         "reminder.set",
+         lambda m: {"content": _strip_punctuation(m.group(1).strip())},
+         "好的"),
+
+        # ── Greetings — direct response, skip LLM (V5) ──
+        (r"^(?:你好|嗨|hi|hello|hey)[啊呀吗嘛哇]?$",
+         "chat",
+         lambda m: {"response": "你好！有什么可以帮你的吗？"},
+         ""),
+
+        (r"^(?:谢谢你?|感谢你?|thanks?|thank you)[啊呀嘛了哈]?$",
+         "chat",
+         lambda m: {"response": "不客气！"},
+         ""),
+
+        (r"^(?:再见|拜拜|bye|goodbye|晚安|good\s*night)[啦了啊]?$",
+         "chat",
+         lambda m: {"response": "再见！"},
+         ""),
     ]
 
     _RULES.clear()

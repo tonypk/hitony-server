@@ -17,7 +17,7 @@ from websockets.server import WebSocketServerProtocol
 from .config import settings
 from .session import Session
 from .asr import transcribe_pcm
-from .tts import synthesize_tts
+from .tts import synthesize_tts, synthesize_tts_streaming
 from .llm import plan_intent, append_user_message, append_assistant_message
 from .tools import route_intent, execute_tool, get_tool
 
@@ -108,21 +108,101 @@ async def _send_tts_round(ws, session, opus_packets, text):
     return sent
 
 
+async def _stream_gen_batched(
+    ws: WebSocketServerProtocol,
+    session: Session,
+    tts_gen,
+) -> int:
+    """Stream Opus packets from async generator in batches with pacing."""
+    sid = session.session_id
+    sent = 0
+    batch = []
+    batch_count = 0
+    pacing_start = None
+    t0 = time.monotonic()
+
+    async for pkt in tts_gen:
+        if session.tts_abort or ws.closed:
+            break
+        batch.append(pkt)
+        if len(batch) >= BATCH_SIZE:
+            blob = b''
+            for p in batch:
+                blob += struct.pack('>H', len(p)) + p
+            ok = await ws_send_safe(ws, blob, session, f"sgen#{batch_count}")
+            if not ok:
+                break
+            sent += len(batch)
+            batch = []
+            batch_count += 1
+
+            if batch_count < PRE_BUFFER_BATCHES:
+                continue
+
+            if pacing_start is None:
+                pacing_start = time.monotonic()
+
+            paced_idx = batch_count - PRE_BUFFER_BATCHES
+            target = pacing_start + (paced_idx + 1) * BATCH_PERIOD
+            now = time.monotonic()
+            if now < target:
+                await asyncio.sleep(target - now)
+
+    # Flush remaining
+    if batch and not session.tts_abort and not ws.closed:
+        blob = b''
+        for p in batch:
+            blob += struct.pack('>H', len(p)) + p
+        ok = await ws_send_safe(ws, blob, session, "sgen_final")
+        if ok:
+            sent += len(batch)
+
+    elapsed = time.monotonic() - t0
+    logger.info(f"[{sid}] TTS gen stream: {sent} packets in {elapsed:.1f}s")
+    return sent
+
+
+async def _send_tts_streaming(ws, session, text, tts_gen):
+    """Send streaming TTS: tts_start → batched audio from async generator → tts_end."""
+    sid = session.session_id
+
+    ok = await ws_send_safe(ws, json.dumps({"type": "tts_start", "text": text}), session, "tts_start")
+    if not ok:
+        logger.error(f"[{sid}] Failed to send tts_start")
+        return 0
+
+    sent = await _stream_gen_batched(ws, session, tts_gen)
+
+    if not session.tts_abort:
+        await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
+        logger.info(f"[{sid}] TTS stream complete: {sent} packets")
+    else:
+        logger.info(f"[{sid}] TTS stream aborted: {sent} packets")
+
+    return sent
+
+
+def _opus_decode_sync(opus_packets: list) -> bytes:
+    """CPU-bound: decode Opus packets to PCM. Runs in thread pool."""
+    decoder = opuslib.Decoder(settings.pcm_sample_rate, settings.pcm_channels)
+    pcm_frames = []
+    for packet in opus_packets:
+        pcm_frame = decoder.decode(packet, 960)
+        pcm_frames.append(pcm_frame)
+    return b''.join(pcm_frames)
+
+
 async def _decode_and_asr(ws, session) -> Optional[str]:
     """Decode Opus → ASR. Returns transcribed text or None."""
     sid = session.session_id
 
     logger.info(f"[{sid}] Pipeline start: {len(session.opus_packets)} opus packets")
 
-    # --- Opus decode ---
+    # --- Opus decode (in thread pool to avoid blocking event loop) ---
     t0 = time.monotonic()
     try:
-        decoder = opuslib.Decoder(settings.pcm_sample_rate, settings.pcm_channels)
-        pcm_frames = []
-        for packet in session.opus_packets:
-            pcm_frame = decoder.decode(packet, 960)
-            pcm_frames.append(pcm_frame)
-        pcm = b''.join(pcm_frames)
+        loop = asyncio.get_event_loop()
+        pcm = await loop.run_in_executor(None, _opus_decode_sync, session.opus_packets)
         logger.info(f"[{sid}] Opus decode: {len(session.opus_packets)} packets -> {len(pcm)} bytes ({time.monotonic()-t0:.2f}s)")
     except Exception as e:
         logger.error(f"[{sid}] Opus decode failed: {e}")
@@ -237,17 +317,11 @@ async def _process_and_speak(ws, session, text: str):
             _auto_resume_music(session, music_was_paused)
             return
         try:
-            opus_packets = await synthesize_tts(reply, session=session)
-            logger.info(f"[{sid}] TTS synth: {len(opus_packets)} packets")
+            await _send_tts_streaming(ws, session, reply,
+                                      synthesize_tts_streaming(reply, session=session))
         except Exception as e:
             logger.error(f"[{sid}] TTS failed: {e}")
             await ws_send_safe(ws, json.dumps({"type": "error", "message": f"TTS failed: {e}"}), session)
-            _auto_resume_music(session, music_was_paused)
-            return
-        if session.tts_abort or ws.closed:
-            _auto_resume_music(session, music_was_paused)
-            return
-        await _send_tts_round(ws, session, opus_packets, reply)
         _auto_resume_music(session, music_was_paused)
         return
 
@@ -287,17 +361,17 @@ async def _process_and_speak(ws, session, text: str):
 
     elif result.type == "tts":
         try:
-            result_packets = await synthesize_tts(result.text, session=session)
+            if tts_session_open:
+                await _stream_gen_batched(ws, session,
+                                          synthesize_tts_streaming(result.text, session=session))
+                await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
+            else:
+                await _send_tts_streaming(ws, session, result.text,
+                                          synthesize_tts_streaming(result.text, session=session))
         except Exception as e:
             logger.error(f"[{sid}] Result TTS failed: {e}")
             if tts_session_open:
                 await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
-            return
-        if tts_session_open:
-            await _stream_batched(ws, session, result_packets)
-            await ws_send_safe(ws, json.dumps({"type": "tts_end"}), session, "tts_end")
-        else:
-            await _send_tts_round(ws, session, result_packets, result.text)
         tts_session_open = False
         # Capture tool result in conversation history
         append_assistant_message(session.device_id, result.text)

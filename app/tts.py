@@ -129,6 +129,91 @@ async def synthesize_tts(text: str, session: Optional[Session] = None) -> list:
     return opus_packets
 
 
+async def synthesize_tts_streaming(text: str, session: Optional[Session] = None):
+    """Yield Opus packets as TTS audio streams in — reduces TTFB by 1-2s.
+    Short phrases (<=20 chars) with cache hits yield from cache directly.
+    Falls back to batch synthesize_tts on streaming errors.
+    """
+    # Edge TTS doesn't support streaming — fall back to batch
+    tts_provider = ""
+    if session:
+        tts_provider = session.config.get("tts_provider", "")
+    if tts_provider == "edge":
+        from .edge_tts_synth import synthesize_edge_tts
+        tts_voice = (session.config.get("openai_tts_voice", "xiaoxiao")
+                     if session else "xiaoxiao")
+        packets = await synthesize_edge_tts(text, voice=tts_voice)
+        for pkt in packets:
+            yield pkt
+        return
+
+    client = _get_client(session)
+    tts_model = (session.config.get("openai_tts_model", settings.openai_tts_model)
+                 if session else settings.openai_tts_model)
+    tts_voice = (session.config.get("openai_tts_voice", settings.openai_tts_voice)
+                 if session else settings.openai_tts_voice)
+
+    # Cache hit for short phrases
+    if len(text) <= _TTS_CACHE_MAX_CHARS:
+        cache_key = (text, tts_model, tts_voice)
+        if cache_key in _tts_cache:
+            _tts_cache.move_to_end(cache_key)
+            logger.info(f"TTS stream cache hit: '{text}' ({len(_tts_cache[cache_key])} packets)")
+            for pkt in _tts_cache[cache_key]:
+                yield pkt
+            return
+
+    logger.info(f"TTS stream: '{text[:50]}...' with {tts_model}/{tts_voice}")
+
+    all_packets = []
+    try:
+        async with client.audio.speech.with_streaming_response.create(
+            model=tts_model, voice=tts_voice, input=text, response_format="pcm",
+        ) as response:
+            encoder = opuslib.Encoder(settings.pcm_sample_rate, settings.pcm_channels,
+                                      opuslib.APPLICATION_VOIP)
+            encoder.bitrate = 24000
+            pcm_buf = bytearray()
+            frame_size = 1920  # 960 samples * 2 bytes
+
+            async for chunk in response.iter_bytes(chunk_size=7680):
+                resampled = _resample_24k_to_16k(chunk)
+                pcm_buf.extend(resampled)
+                while len(pcm_buf) >= frame_size:
+                    frame = bytes(pcm_buf[:frame_size])
+                    pcm_buf = pcm_buf[frame_size:]
+                    pkt = encoder.encode(frame, 960)
+                    all_packets.append(pkt)
+                    yield pkt
+
+            # Flush remaining PCM
+            if pcm_buf:
+                frame = bytes(pcm_buf) + b'\x00' * (frame_size - len(pcm_buf))
+                pkt = encoder.encode(frame, 960)
+                all_packets.append(pkt)
+                yield pkt
+
+    except Exception as e:
+        if session and session.config.openai_base_url and not all_packets:
+            logger.warning(f"TTS stream: Pro mode failed ({e}), falling back to batch")
+            packets = await synthesize_tts(text, session=session)
+            for pkt in packets:
+                yield pkt
+            return
+        if not all_packets:
+            raise
+        logger.error(f"TTS stream error after {len(all_packets)} packets: {e}")
+
+    logger.info(f"TTS stream: {len(all_packets)} packets for '{text[:30]}'")
+
+    # Cache short phrases
+    if len(text) <= _TTS_CACHE_MAX_CHARS and all_packets:
+        cache_key = (text, tts_model, tts_voice)
+        _tts_cache[cache_key] = all_packets
+        if len(_tts_cache) > _TTS_CACHE_MAX:
+            _tts_cache.popitem(last=False)
+
+
 def _resample_and_encode(pcm_24k: bytes) -> list:
     """CPU-bound: resample 24k→16k + Opus encode. Runs in thread pool."""
     pcm_16k = _resample_24k_to_16k(pcm_24k)
