@@ -55,10 +55,10 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
-            # Install/update dependencies
+            # Install/update dependencies (use venv pip directly — source activate
+            # is unreliable in non-interactive SSH shells and hits PEP 668)
             echo "📚 Updating dependencies..."
-            source .venv/bin/activate
-            pip install -r requirements.txt --quiet
+            .venv/bin/python3 -m pip install -r requirements.txt --quiet
 
             # Restart service (try both old and new service names for compatibility)
             echo "🔄 Restarting HiTony server service..."
